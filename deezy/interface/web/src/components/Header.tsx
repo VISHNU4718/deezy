@@ -101,4 +101,3 @@ export function Header({ onMenuClick, sidebarCollapsed }: HeaderProps) {
       </div>
     </header>
   );
-}

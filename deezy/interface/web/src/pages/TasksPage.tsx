@@ -254,7 +254,7 @@ export function TasksPage() {
                           </details>
                         )}
                       </div>
-                    ))}
+                    })}
                   </div>
                 </div>
               </div>

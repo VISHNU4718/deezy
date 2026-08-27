@@ -315,7 +315,6 @@ export function ConversationSidebar({
                       </button>
                     )}
                   </div>
-                )}
               </div>
             )}
           </div>

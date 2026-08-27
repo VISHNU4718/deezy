@@ -3,6 +3,7 @@ Mock tools for testing Deezy without external dependencies.
 """
 import json
 from typing import Dict, Any
+from datetime import datetime
 from deezy.brain.models import BaseTool, ToolParameter, ToolResult, ToolCategory, RiskLevel
 from deezy.brain import register_tool
 import platform
@@ -146,14 +147,43 @@ class GetSystemInfoTool(BaseTool):
             "cpu_count": psutil.cpu_count(),
             "memory_total_gb": round(psutil.virtual_memory().total / (1024**3), 1),
             "memory_available_gb": round(psutil.virtual_memory().available / (1024**3), 1),
-        }
-
+}
+ 
         return ToolResult(
             success=True,
             data=info
         )
-
-
+ 
+ 
+class GetCurrentTimeTool(BaseTool):
+    """Get the current local date and time."""
+    name = "get_current_time"
+    description = "Get the current local date, time, timezone, and day of week"
+    category = ToolCategory.SYSTEM
+    risk_level = RiskLevel.LOW
+    parameters = []
+ 
+    def execute(self, **kwargs) -> ToolResult:
+        from datetime import datetime
+        import time
+ 
+        now = datetime.now()
+        timezone_name = time.tzname[0] if time.tzname[0] else "UTC"
+        if time.daylight:
+            timezone_name = time.tzname[1]
+ 
+        return ToolResult(
+            success=True,
+            data={
+                "date": now.strftime("%Y-%m-%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "timezone": timezone_name,
+                "day_of_week": now.strftime("%A"),
+                "iso_format": now.isoformat(),
+            }
+        )
+ 
+ 
 class ListRunningAppsTool(BaseTool):
     """List running applications."""
     name = "list_running_apps"
@@ -440,6 +470,7 @@ def register_mock_tools():
     register_tool(SearchProductsTool())
     register_tool(EvaluateProductTool())
     register_tool(GetSystemInfoTool())
+    register_tool(GetCurrentTimeTool())
     register_tool(ListRunningAppsTool())
     register_tool(CreateNotificationTool())
     register_tool(SearchFilesTool())

@@ -118,7 +118,7 @@ export function HistoryPage() {
                 {filteredTasks.map(task => (
                   <tr key={task.id} className="hover:bg-background transition cursor-pointer" onClick={() => setSelectedTask(task)}>
                     <td className="px-4 py-3">
-                      <div className="font-medium truncate max-w-xs">{task.objective}</td>
+                      {task.objective}</td>
                     <td className="px-4 py-3 hidden md:table-cell">
                       {getStatusBadge(task.status)}
                     </td>

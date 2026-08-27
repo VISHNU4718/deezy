@@ -1,0 +1,202 @@
+# Deezy Configuration
+# Copy to config/local.yaml and customize for your environment
+
+# Application
+app:
+  name: "deezy"
+  version: "0.1.0"
+  environment: "development"  # development, staging, production
+  debug: true
+  max_monthly_cost: 0  # ₹0/month - hard constraint, enforced at runtime
+
+# Database
+database:
+  type: "sqlite"  # sqlite, postgresql
+  path: "data/deezy.db"
+  # For PostgreSQL:
+  # host: "localhost"
+  # port: 5432
+  # name: "deezy"
+  # user: "postgres"
+  # password: "${DB_PASSWORD}"
+
+# LLM Provider
+llm:
+  provider: "local"  # local, ollama, openai, anthropic, mock
+  model: "llama3.2:3b"  # Model identifier for the provider
+  temperature: 0.3
+  max_tokens: 4000
+  timeout: 60
+  max_retries: 3
+  # Provider-specific settings
+  ollama:
+    base_url: "http://localhost:11434"
+    # api_key: "${OLLAMA_API_KEY}"  # Not needed for local
+  openai:
+    base_url: "https://api.openai.com/v1"
+    # api_key: "${OPENAI_API_KEY}"
+  anthropic:
+    base_url: "https://api.anthropic.com"
+    # api_key: "${ANTHROPIC_API_KEY}"
+
+# Agent Behavior
+agent:
+  max_iterations: 10
+  max_tool_calls_per_iteration: 3
+  enable_memory: true
+  memory_limit: 50  # Number of recent messages to keep in context
+  approval_required_for_high_risk: true
+  approval_required_for_medium_risk: false
+  auto_approve_low_risk: true
+
+# Tools Configuration
+tools:
+  product_research:
+    enabled: true
+    mock_mode: true  # Use mock data when APIs unavailable
+    sources:
+      - "reddit"
+      - "pinterest"
+      - "amazon_paapi"
+  website:
+    enabled: true
+    mock_mode: true
+    deeztop_root: "../deeztop"  # Path to the main deeztop website repo
+  pinterest:
+    enabled: true
+    mock_mode: true
+    # access_token: "${PINTEREST_ACCESS_TOKEN}"
+    # refresh_token: "${PINTEREST_REFRESH_TOKEN}"
+    # client_id: "${PINTEREST_CLIENT_ID}"
+    # client_secret: "${PINTEREST_CLIENT_SECRET}"
+    # board_id: "${PINTEREST_BOARD_ID}"
+  analytics:
+    enabled: true
+    mock_mode: true
+    # api_key: "${ANALYTICS_API_KEY}"
+
+# Scheduler
+scheduler:
+  enabled: false  # Enable when ready
+  timezone: "UTC"
+  jobs:
+    daily_product_discovery:
+      enabled: true
+      frequency: "daily"
+      time: "02:00"
+      task: "discover_products"
+    daily_affiliate_check:
+      enabled: true
+      frequency: "daily"
+      time: "03:00"
+      task: "check_affiliate_links"
+    weekly_pinterest_analysis:
+      enabled: true
+      frequency: "weekly"
+      day: "monday"
+      time: "04:00"
+      task: "analyze_pinterest_performance"
+    weekly_product_analysis:
+      enabled: true
+      frequency: "weekly"
+      day: "monday"
+      time: "05:00"
+      task: "analyze_product_performance"
+
+# Event System
+events:
+  enabled: true
+  handlers:
+    - "product_discovered"
+    - "affiliate_link_invalid"
+    - "traffic_anomaly"
+    - "pinterest_performance_change"
+    - "product_popularity_change"
+    - "scheduled_task_due"
+
+# Approval System
+approval:
+  risk_levels:
+    low:
+      auto_approve: true
+      actions:
+        - "research"
+        - "analysis"
+        - "generate_draft"
+        - "generate_recommendation"
+    medium:
+      auto_approve: false
+      actions:
+        - "update_content"
+        - "update_product"
+    high:
+      auto_approve: false
+      actions:
+        - "publish_product"
+        - "delete_product"
+        - "modify_website_settings"
+        - "publish_pinterest_content"
+  notification_methods:
+    - "cli"
+    # - "email"
+    # - "webhook"
+
+# Logging
+logging:
+  level: "DEBUG"  # DEBUG, INFO, WARNING, ERROR
+  format: "json"  # json, text
+  file: "data/deezy.log"
+  max_file_size_mb: 10
+  backup_count: 5
+  console_output: true
+
+# Website Integration (Deeztop)
+website:
+  root_path: "C:/Users/beern/deeztop"
+  data_path: "C:/Users/beern/deeztop/data"
+  templates_path: "C:/Users/beern/deezy/deeztop"
+  categories:
+    - "desk-accessories"
+    - "lighting-ambience"
+    - "cable-cord-organization"
+    - "storage-shelving"
+    - "chairs-ergonomics"
+    - "study-dorm"
+  affiliate_tag: "vishnubeer-21"
+
+# Product Evaluation Scoring
+scoring:
+  weights:
+    relevance: 0.25
+    search_demand: 0.15
+    competition: 0.10
+    price: 0.10
+    commission_potential: 0.15
+    product_quality: 0.10
+    content_potential: 0.05
+    pinterest_potential: 0.05
+    uniqueness: 0.03
+    existing_coverage: 0.02
+  thresholds:
+    auto_approve: 0.75
+    review_required: 0.50
+    reject: 0.30
+
+# External APIs (credentials in .env)
+external_apis:
+  reddit:
+    enabled: true
+    # No API key needed for public RSS
+  amazon_paapi:
+    enabled: false
+    # access_key: "${AWS_ACCESS_KEY_ID}"
+    # secret_key: "${AWS_SECRET_ACCESS_KEY}"
+    # partner_tag: "${PARTNER_TAG}"
+    # marketplace: "US"
+  pinterest:
+    enabled: false
+    # access_token: "${PINTEREST_ACCESS_TOKEN}"
+  google_analytics:
+    enabled: false
+    # api_key: "${GA_API_KEY}"
+    # property_id: "${GA_PROPERTY_ID}"
