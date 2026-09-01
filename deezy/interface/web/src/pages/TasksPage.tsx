@@ -1,22 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Filter, MoreVertical, Play, Pause, Trash2, Clock, CheckCircle, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
-import { useApi } from '../../hooks/useApi';
-import type { Task } from '../../types';
+import { Plus, Search, Filter, Clock, CheckCircle, X, Loader2, AlertTriangle } from 'lucide-react';
+import { useTasks } from '../hooks/useApi';
+import type { Task, TaskStep } from '../types';
 import { format, formatDistanceToNow } from 'date-fns';
 
-export function TasksPage() {
-  const { tasks, loading, error, loadTasks, createTask, getTask } = useApi();
+export function TasksPage(): React.ReactElement {
+  const { tasks, loading, error, loadTasks, createTask, getTask } = useTasks();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newTaskInput, setNewTaskInput] = useState('');
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<'all' | 'running' | 'completed' | 'failed'>('all');
 
-  const filteredTasks = tasks.filter(t => {
+  const filteredTasks = tasks.filter((t: Task) => {
     if (filter === 'all') return true;
     return t.status === filter;
   });
 
-  const handleCreateTask = async () => {
+  const handleCreateTask = async (): Promise<void> => {
     if (!newTaskInput.trim()) return;
     try {
       await createTask(newTaskInput);
@@ -27,7 +27,7 @@ export function TasksPage() {
     }
   };
 
-  const handleTaskClick = async (task: Task) => {
+  const handleTaskClick = async (task: Task): Promise<void> => {
     if (task.status === 'running') {
       setSelectedTask(task);
     } else {
@@ -40,7 +40,7 @@ export function TasksPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string): React.ReactElement => {
     switch (status) {
       case 'running':
         return <span className="px-2 py-0.5 text-xs bg-primary/10 text-primary rounded">Running</span>;
@@ -55,7 +55,7 @@ export function TasksPage() {
     }
   };
 
-  const getRiskBadge = (risk: string) => {
+  const getRiskBadge = (risk: string): React.ReactElement => {
     switch (risk) {
       case 'high':
         return <span className="px-2 py-0.5 text-xs bg-danger/10 text-danger rounded">High</span>;
@@ -68,7 +68,6 @@ export function TasksPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold">Tasks</h1>
@@ -83,7 +82,6 @@ export function TasksPage() {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="flex items-center gap-4 mb-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
@@ -94,7 +92,7 @@ export function TasksPage() {
           />
         </div>
         <div className="flex items-center gap-2">
-          {(['all', 'running', 'completed', 'failed'] as const).map(f => (
+          {(['all', 'running', 'completed', 'failed'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -110,7 +108,6 @@ export function TasksPage() {
         </div>
       </div>
 
-      {/* Task List */}
       <div className="bg-surface border border-border rounded-lg overflow-hidden flex-1">
         {loading ? (
           <div className="flex items-center justify-center h-64">
@@ -129,7 +126,7 @@ export function TasksPage() {
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {filteredTasks.map(task => (
+            {filteredTasks.map((task: Task) => (
               <button
                 key={task.id}
                 onClick={() => handleTaskClick(task)}
@@ -152,7 +149,7 @@ export function TasksPage() {
                         {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}
                       </span>
                     )}
-                    <span>{task.steps.filter(s => s.verified).length}/{task.steps.length} steps</span>
+                    <span>{task.steps.filter((s) => s.verified).length}/{task.steps.length} steps</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -166,7 +163,6 @@ export function TasksPage() {
         )}
       </div>
 
-      {/* Create Task Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-surface rounded-xl p-6 w-full max-w-md">
@@ -178,7 +174,7 @@ export function TasksPage() {
             </div>
             <textarea
               value={newTaskInput}
-              onChange={e => setNewTaskInput(e.target.value)}
+              onChange={(e) => setNewTaskInput(e.target.value)}
               placeholder="What would you like Deezy to do?"
               className="w-full min-h-[100px] px-4 py-3 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-light resize-none mb-4"
               rows={4}
@@ -203,7 +199,6 @@ export function TasksPage() {
         </div>
       )}
 
-      {/* Task Detail Panel */}
       {selectedTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-surface rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
@@ -234,9 +229,9 @@ export function TasksPage() {
                 )}
               </div>
               <div>
-                <h4 className="font-medium mb-3">Steps ({selectedTask.steps.filter(s => s.verified).length}/{selectedTask.steps.length})</h4>
+                <h4 className="font-medium mb-3">Steps ({selectedTask.steps.filter((s) => s.verified).length}/{selectedTask.steps.length})</h4>
                 <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {selectedTask.steps.map((step, index) => (
+                  {selectedTask.steps.map((step: TaskStep, index: number) => (
                     <div key={step.step_id} className="flex items-start gap-3 p-3 bg-background rounded-lg">
                       <div className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium bg-primary/10 text-primary">
                         {index + 1}
@@ -254,8 +249,8 @@ export function TasksPage() {
                           </details>
                         )}
                       </div>
-                    })}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="p-4 border-t border-border flex justify-end gap-2">

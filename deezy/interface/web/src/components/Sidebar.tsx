@@ -10,7 +10,7 @@ import {
   ChevronRight,
   Brain,
 } from 'lucide-react';
-import { useApi } from '../../hooks/useApi';
+import { useTools } from '../hooks/useApi';
 
 interface SidebarProps {
   collapsed?: boolean;
@@ -27,7 +27,7 @@ const navItems = [
 
 export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const location = useLocation();
-  const { tools } = useApi();
+  const { tools } = useTools();
 
   return (
     <aside

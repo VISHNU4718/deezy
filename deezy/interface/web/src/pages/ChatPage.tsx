@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Send, Mic, Paperclip, Bot, Loader2, X, Check, AlertTriangle, Copy, ThumbsUp, ThumbsDown, Volume2, VolumeX, MicOff } from 'lucide-react';
-import { useTasks, useConversations } from '../../hooks/useApi';
-import { useSpeechRecognition, useSpeechSynthesis } from '../../utils/voice';
-import type { ChatMessage, Task, WebSocketMessage, TaskStep, TaskPlanEvent, TaskStepEvent } from '../../types';
+import { useTasks, useConversations, useTaskEvents } from '../hooks/useApi';
+import { useSpeechRecognition, useSpeechSynthesis } from '../utils/voice';
+import type { ChatMessage, Task, TaskStep } from '../types';
 import { format } from 'date-fns';
 
 export function ChatPage() {
@@ -18,10 +18,9 @@ export function ChatPage() {
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
   const [showTaskPanel, setShowTaskPanel] = useState(false);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
   // Load conversation messages when conversationId changes
   useEffect(() => {
@@ -30,7 +29,7 @@ export function ChatPage() {
         try {
           const conv = await getConversation(conversationId);
           if (conv.messages && conv.messages.length > 0) {
-            setMessages(conv.messages);
+            setMessages(conv.messages.map(m => ({ ...m, id: m.id || `msg_${Date.now()}` })) as ChatMessage[]);
           } else {
             setMessages([]);
           }
@@ -88,53 +87,15 @@ export function ChatPage() {
     },
   });
 
-  // Auto-scroll to bottom
+  // Task events via WebSocket hook
+  const { plan, currentStep, completed, failed } = useTaskEvents(currentTask?.id || null);
+
+  // Sync task state with WebSocket events
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, currentTask]);
-
-  // Initialize WebSocket
-  useEffect(() => {
-    const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const ws = new WebSocket(
-      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/${clientId}`
-    );
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const message: WebSocketMessage = JSON.parse(event.data);
-        handleWebSocketMessage(message);
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e);
-      }
-    };
-
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      // Reconnect after 3 seconds
-      setTimeout(() => {
-        if (wsRef.current?.readyState === WebSocket.CLOSED) {
-          // Reconnection would be handled here
-        }
-      }, 3000);
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, []);
-
-  const handleWebSocketMessage = (message: WebSocketMessage) => {
-    if (message.type === 'plan_created' && message.task_id === currentTask?.id) {
-      const planEvent = message as unknown as TaskPlanEvent;
+    if (plan) {
       setCurrentTask(prev => prev ? {
         ...prev,
-        steps: planEvent.plan.map((p, i) => ({
+        steps: plan.plan.map((p, i) => ({
           step_id: p.step_id,
           description: p.description,
           tool: p.tool,
@@ -146,68 +107,79 @@ export function ChatPage() {
         status: 'running',
       } : null);
     }
+  }, [plan]);
 
-    if (message.type === 'step_started' && message.task_id === currentTask?.id) {
-      const stepEvent = message as unknown as TaskStepEvent;
+  useEffect(() => {
+    if (currentStep) {
       setCurrentTask(prev => prev ? {
         ...prev,
-        steps: prev.steps.map(s => 
-          s.step_id === stepEvent.step.step_id 
+        steps: prev.steps.map(s =>
+          s.step_id === currentStep.step.step_id
             ? { ...s, status: 'running' as const }
             : s
         ),
       } : null);
     }
+  }, [currentStep]);
 
-    if (message.type === 'step_completed' && message.task_id === currentTask?.id) {
-      const stepEvent = message as unknown as TaskStepEvent;
+  useEffect(() => {
+    if (currentStep && currentStep.type === 'step_completed') {
       setCurrentTask(prev => prev ? {
         ...prev,
-        steps: prev.steps.map(s => 
-          s.step_id === stepEvent.step.step_id 
-            ? { ...s, ...stepEvent.step, status: 'completed' as const, verified: true }
+        steps: prev.steps.map(s =>
+          s.step_id === currentStep.step.step_id
+            ? { ...s, ...currentStep.step, status: 'completed' as const, verified: true }
             : s
         ),
       } : null);
     }
+  }, [currentStep]);
 
-    if (message.type === 'step_failed' && message.task_id === currentTask?.id) {
-      const stepEvent = message as unknown as TaskStepEvent;
+  useEffect(() => {
+    if (currentStep && currentStep.type === 'step_failed') {
       setCurrentTask(prev => prev ? {
         ...prev,
-        steps: prev.steps.map(s => 
-          s.step_id === stepEvent.step.step_id 
-            ? { ...s, ...stepEvent.step, status: 'failed' as const, error: stepEvent.error }
+        steps: prev.steps.map(s =>
+          s.step_id === currentStep.step.step_id
+            ? { ...s, ...currentStep.step, status: 'failed' as const, error: currentStep.error }
             : s
         ),
       } : null);
     }
+  }, [currentStep]);
 
-    if (message.type === 'task_completed' && message.task_id === currentTask?.id) {
-      setCurrentTask(prev => prev ? { ...prev, status: 'completed' as const, result: message.result } : null);
+  useEffect(() => {
+    if (completed) {
+      setCurrentTask(prev => prev ? { ...prev, status: 'completed' as const, result: completed.result } : null);
       setIsLoading(false);
-      // Add final response to chat
-      if (message.result?.message) {
+      if (completed.result?.message) {
         setMessages(prev => [...prev, {
           id: `msg_${Date.now()}`,
           role: 'assistant',
-          content: message.result.message,
+          content: completed.result.message,
           timestamp: new Date().toISOString(),
         }]);
       }
     }
+  }, [completed]);
 
-    if (message.type === 'task_failed' && message.task_id === currentTask?.id) {
+  useEffect(() => {
+    if (failed) {
       setCurrentTask(prev => prev ? { ...prev, status: 'failed' as const } : null);
       setIsLoading(false);
       setMessages(prev => [...prev, {
         id: `msg_${Date.now()}`,
         role: 'assistant',
-        content: `Task failed: ${message.error || 'Unknown error'}`,
+        content: `Task failed: ${failed.error || 'Unknown error'}`,
         timestamp: new Date().toISOString(),
       }]);
     }
-  };
+  }, [failed]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, currentTask]);
 
   const sendMessage = async () => {
     const text = input.trim() || transcript.trim();
@@ -238,16 +210,9 @@ export function ChatPage() {
         steps: [],
         current_step_index: 0,
         plan_version: 1,
+        risk_level: 'low',
       });
       setShowTaskPanel(true);
-
-      // Subscribe to task updates
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'subscribe_task',
-          task_id: taskResult.task_id,
-        }));
-      }
     } catch (error) {
       setIsLoading(false);
       setMessages(prev => [...prev, {
@@ -477,7 +442,7 @@ function TaskPanel({ task, onClose }: TaskPanelProps) {
         return <Check className="w-4 h-4 text-success" />;
       case 'failed':
         return <AlertTriangle className="w-4 h-4 text-danger" />;
-      case 'skipped':
+      case 'cancelled':
         return <X className="w-4 h-4 text-muted" />;
       default:
         return <div className="w-4 h-4 border-2 border-border rounded-full" />;

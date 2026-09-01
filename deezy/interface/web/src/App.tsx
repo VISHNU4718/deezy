@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { MainLayout } from './components/Layout'
 import { ChatPage } from './pages/ChatPage'
 import { TasksPage } from './pages/TasksPage'

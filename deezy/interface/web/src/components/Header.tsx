@@ -64,12 +64,12 @@ export function Header({ onMenuClick, sidebarCollapsed }: HeaderProps) {
               <User className="w-4 h-4 text-primary" />
             </div>
             {!sidebarCollapsed && (
-              <>
+              <React.Fragment>
                 <span className="text-sm font-medium hidden sm:block">User</span>
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
-              </>
+              </React.Fragment>
             )}
           </button>
 
@@ -96,8 +96,9 @@ export function Header({ onMenuClick, sidebarCollapsed }: HeaderProps) {
                 Sign out
               </button>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </header>
   );
+}

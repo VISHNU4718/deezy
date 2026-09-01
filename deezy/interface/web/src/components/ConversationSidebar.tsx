@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare,
@@ -16,10 +16,9 @@ import {
   Upload,
   GitBranch,
 } from 'lucide-react';
-import { useConversations } from '../../hooks/useApi';
-import type { Conversation } from '../../types';
+import { useConversations } from '../hooks/useApi';
+import type { Conversation, ConversationBase } from '../types';
 import { format, formatDistanceToNow } from 'date-fns';
-import { createWebSocket, subscribeToConversation, unsubscribeFromConversation } from '../../utils/api';
 
 interface ConversationSidebarProps {
   collapsed?: boolean;
@@ -55,9 +54,7 @@ export function ConversationSidebar({
   const [editingConv, setEditingConv] = useState<Conversation | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [importFile, setImportFile] = useState<File | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
-  // Load conversations on mount
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
@@ -95,8 +92,8 @@ export function ConversationSidebar({
     }
   };
 
-  const handleEditConversation = (conv: Conversation) => {
-    setEditingConv(conv);
+  const handleEditConversation = (conv: ConversationBase) => {
+    setEditingConv(conv as Conversation);
     setEditTitle(conv.title);
   };
 
@@ -151,8 +148,6 @@ export function ConversationSidebar({
 
   const handleCreateBranch = async (convId: string) => {
     try {
-      // For now, branch from the latest message - in a full implementation,
-      // we'd let the user select which message to branch from
       const result = await createBranch(convId, 1, `Branch of ${conversations.find(c => c.id === convId)?.title || 'Conversation'}`);
       if (result?.conversation_id) {
         onSelectConversation?.(result.conversation_id);
@@ -181,7 +176,7 @@ export function ConversationSidebar({
           </div>
         )}
         {collapsed && (
-          <Brain className="w-6 h-6 text-primary mx-auto" />
+          <MessageSquare className="w-6 h-6 text-primary mx-auto" />
         )}
         {!collapsed && onToggle && (
           <button
@@ -315,6 +310,7 @@ export function ConversationSidebar({
                       </button>
                     )}
                   </div>
+                ))}
               </div>
             )}
           </div>

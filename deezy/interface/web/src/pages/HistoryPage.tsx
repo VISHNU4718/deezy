@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Download, Clock, CheckCircle, XCircle, AlertTriangle, Loader2, Eye, ChevronRight } from 'lucide-react';
-import { useApi } from '../../hooks/useApi';
-import type { Task } from '../../types';
+import { Search, Filter, Download, Clock, CheckCircle, XCircle, AlertTriangle, Loader2, Eye, ChevronRight, X } from 'lucide-react';
+import { useApi } from '../hooks/useApi';
+import type { Task } from '../types';
 import { format, formatDistanceToNow } from 'date-fns';
 
 export function HistoryPage() {
