@@ -2,12 +2,13 @@
 LLM Provider Abstraction for Deezy.
 Supports multiple providers: local (Ollama), OpenAI-compatible, Anthropic, etc.
 """
-import os
+
 import json
+import os
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 
 class MessageRole(str, Enum):
@@ -59,7 +60,9 @@ class LLMProvider(ABC):
         pass
 
     @abstractmethod
-    async def chat_stream(self, messages: List[Message], tools: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+    async def chat_stream(
+        self, messages: List[Message], tools: Optional[List[Dict]] = None
+    ) -> AsyncGenerator[str, None]:
         """Send a streaming chat completion request."""
         pass
 
@@ -93,7 +96,8 @@ class LLMProvider(ABC):
                 last_exception = e
                 if attempt < self.max_retries - 1:
                     import time
-                    wait_time = (2 ** attempt) * 1.0  # 1s, 2s, 4s...
+
+                    wait_time = (2**attempt) * 1.0  # 1s, 2s, 4s...
                     time.sleep(wait_time)
                 else:
                     raise last_exception
@@ -113,6 +117,7 @@ class OllamaProvider(LLMProvider):
     def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Make HTTP request to Ollama API."""
         import requests
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -146,21 +151,23 @@ class OllamaProvider(LLMProvider):
         tool_calls = []
         if message.get("tool_calls"):
             for tc in message["tool_calls"]:
-                tool_calls.append(ToolCall(
-                    id=tc["id"],
-                    name=tc["function"]["name"],
-                    arguments=json.loads(tc["function"]["arguments"])
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc["id"], name=tc["function"]["name"], arguments=json.loads(tc["function"]["arguments"])
+                    )
+                )
 
         return LLMResponse(
             content=message.get("content", ""),
             tool_calls=tool_calls,
             usage=data.get("usage", {}),
             model=data.get("model", self.model),
-            finish_reason=choice.get("finish_reason", "")
+            finish_reason=choice.get("finish_reason", ""),
         )
 
-    async def chat_stream(self, messages: List[Message], tools: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+    async def chat_stream(
+        self, messages: List[Message], tools: Optional[List[Dict]] = None
+    ) -> AsyncGenerator[str, None]:
         """Stream chat completion (not fully implemented for Ollama)."""
         response = self.chat(messages, tools)
         yield response.content
@@ -181,16 +188,19 @@ class OpenAICompatibleProvider(LLMProvider):
         self.base_url = provider_config.get("base_url", "https://openrouter.ai/api/v1")
 
         if not self.api_key and provider_name != "local":
-            raise ValueError(f"{provider_name} API key required. Set {provider_name.upper()}_API_KEY or provide in config.")
+            raise ValueError(
+                f"{provider_name} API key required. Set {provider_name.upper()}_API_KEY or provide in config."
+            )
 
     def _make_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         import requests
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         if "openrouter" in self.base_url:
-            headers["HTTP-Referer"] = "https://deeztop.com"
+            headers["HTTP-Referer"] = "https://github.com/VISHNU4718/deezy"
             headers["X-Title"] = "Deezy"
 
         url = f"{self.base_url}/chat/completions"
@@ -222,22 +232,25 @@ class OpenAICompatibleProvider(LLMProvider):
         tool_calls = []
         if message.get("tool_calls"):
             for tc in message["tool_calls"]:
-                tool_calls.append(ToolCall(
-                    id=tc["id"],
-                    name=tc["function"]["name"],
-                    arguments=json.loads(tc["function"]["arguments"])
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc["id"], name=tc["function"]["name"], arguments=json.loads(tc["function"]["arguments"])
+                    )
+                )
 
         return LLMResponse(
             content=message.get("content", ""),
             tool_calls=tool_calls,
             usage=data.get("usage", {}),
             model=data.get("model", self.model),
-            finish_reason=choice.get("finish_reason", "")
+            finish_reason=choice.get("finish_reason", ""),
         )
 
-    async def chat_stream(self, messages: List[Message], tools: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+    async def chat_stream(
+        self, messages: List[Message], tools: Optional[List[Dict]] = None
+    ) -> AsyncGenerator[str, None]:
         import requests
+
         payload = {
             "model": self.model,
             "messages": self._prepare_messages(messages),
@@ -255,7 +268,7 @@ class OpenAICompatibleProvider(LLMProvider):
             "Content-Type": "application/json",
         }
         if "openrouter" in self.base_url:
-            headers["HTTP-Referer"] = "https://deeztop.com"
+            headers["HTTP-Referer"] = "https://github.com/VISHNU4718/deezy"
             headers["X-Title"] = "Deezy"
 
         url = f"{self.base_url}/chat/completions"
@@ -265,7 +278,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
         for line in response.iter_lines():
             if line:
-                line = line.decode('utf-8')
+                line = line.decode("utf-8")
                 if line.startswith("data: "):
                     data_str = line[6:]
                     if data_str.strip() == "[DONE]":
@@ -298,7 +311,7 @@ class MockProvider(LLMProvider):
                 tool_calls=[ToolCall(**tc) for tc in resp.get("tool_calls", [])],
                 usage={"prompt_tokens": 100, "completion_tokens": 50},
                 model=self.model,
-                finish_reason="stop"
+                finish_reason="stop",
             )
 
         # Check if this is a planning request (system prompt contains planner instructions)
@@ -319,21 +332,19 @@ class MockProvider(LLMProvider):
                 if tool.get("function", {}).get("name") == "search_products":
                     return LLMResponse(
                         content="I'll search for products for you.",
-                        tool_calls=[ToolCall(
-                            id="call_1",
-                            name="search_products",
-                            arguments={"query": "desk", "limit": 10}
-                        )],
+                        tool_calls=[
+                            ToolCall(id="call_1", name="search_products", arguments={"query": "desk", "limit": 10})
+                        ],
                         usage={"prompt_tokens": 100, "completion_tokens": 50},
                         model=self.model,
-                        finish_reason="tool_calls"
+                        finish_reason="tool_calls",
                     )
 
         return LLMResponse(
             content="Task completed.",
             usage={"prompt_tokens": 100, "completion_tokens": 50},
             model=self.model,
-            finish_reason="stop"
+            finish_reason="stop",
         )
 
     def _generate_mock_plan(self, user_prompt: str) -> LLMResponse:
@@ -359,7 +370,7 @@ class MockProvider(LLMProvider):
                     "params": {"query": "desk lamp", "limit": 10},
                     "expected_result": "List of desk lamps",
                     "risk_level": "low",
-                    "requires_approval": False
+                    "requires_approval": False,
                 },
                 {
                     "description": "Evaluate top desk lamp",
@@ -367,8 +378,8 @@ class MockProvider(LLMProvider):
                     "params": {"asin": "{{step_1_result[0].asin}}", "criteria": "relevance,price,quality"},
                     "expected_result": "Product evaluation",
                     "risk_level": "low",
-                    "requires_approval": False
-                }
+                    "requires_approval": False,
+                },
             ]
         elif "cpu" in objective or "system" in objective:
             plan = [
@@ -378,7 +389,7 @@ class MockProvider(LLMProvider):
                     "params": {"detail_level": "basic"},
                     "expected_result": "System specifications",
                     "risk_level": "low",
-                    "requires_approval": False
+                    "requires_approval": False,
                 }
             ]
         elif "app" in objective or "running" in objective:
@@ -389,7 +400,7 @@ class MockProvider(LLMProvider):
                     "params": {"limit": 20, "sort_by": "cpu"},
                     "expected_result": "List of running applications",
                     "risk_level": "low",
-                    "requires_approval": False
+                    "requires_approval": False,
                 }
             ]
         elif "time" in objective or "date" in objective:
@@ -400,7 +411,7 @@ class MockProvider(LLMProvider):
                     "params": {},
                     "expected_result": "Current time and date",
                     "risk_level": "low",
-                    "requires_approval": False
+                    "requires_approval": False,
                 }
             ]
         elif "window" in objective:
@@ -411,7 +422,7 @@ class MockProvider(LLMProvider):
                     "params": {},
                     "expected_result": "Active window info",
                     "risk_level": "low",
-                    "requires_approval": False
+                    "requires_approval": False,
                 }
             ]
         elif "fakeapp" in objective or "fake" in objective:
@@ -423,7 +434,7 @@ class MockProvider(LLMProvider):
                     "params": {"app": "fakeapp"},
                     "expected_result": "Application launched",
                     "risk_level": "medium",
-                    "requires_approval": True
+                    "requires_approval": True,
                 }
             ]
         else:
@@ -434,7 +445,7 @@ class MockProvider(LLMProvider):
                     "params": {"query": objective[:50], "limit": 5},
                     "expected_result": "Search results",
                     "risk_level": "low",
-                    "requires_approval": False
+                    "requires_approval": False,
                 }
             ]
 
@@ -442,14 +453,17 @@ class MockProvider(LLMProvider):
         self._plan_cache[objective] = plan
 
         import json
+
         return LLMResponse(
             content=json.dumps(plan),
             usage={"prompt_tokens": 100, "completion_tokens": 50},
             model=self.model,
-            finish_reason="stop"
+            finish_reason="stop",
         )
 
-    async def chat_stream(self, messages: List[Message], tools: Optional[List[Dict]] = None) -> AsyncGenerator[str, None]:
+    async def chat_stream(
+        self, messages: List[Message], tools: Optional[List[Dict]] = None
+    ) -> AsyncGenerator[str, None]:
         response = self.chat(messages, tools)
         yield response.content
 
@@ -518,9 +532,7 @@ def get_provider(provider_name: str = None, config: Dict[str, Any] = None) -> LL
             provider = provider_class(config)
 
             # Test the provider with a quick health check
-            test_response = provider.chat([
-                Message(role=MessageRole.USER, content="ping")
-            ])
+            test_response = provider.chat([Message(role=MessageRole.USER, content="ping")])
             if test_response:
                 if fallback != provider_name:
                     print(f"[FALLBACK] Using '{fallback}' instead of '{provider_name}'")

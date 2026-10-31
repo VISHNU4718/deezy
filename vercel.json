@@ -1,0 +1,21 @@
+{
+  "framework": null,
+  "buildCommand": "cd deezy/interface/web && npm ci && npm run build",
+  "outputDirectory": "deezy/interface/web/dist",
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30,
+      "includeFiles": "deezy/config/settings.yaml"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index?p=$1"
+    },
+    {
+      "source": "/((?!assets/|favicon).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -1,10 +1,9 @@
 /**
- * API client and WebSocket utilities for Deezy Web UI.
+ * API client for the Deezy web UI.
  */
 
 import type {
   Task,
-  TaskCreateResponse,
   ConversationBase,
   Conversation,
   ConversationCreate,
@@ -19,19 +18,9 @@ import type {
   MemoryUpdate,
   Settings,
   ToolSchema,
-  WebSocketMessage,
-  TaskPlanEvent,
-  TaskStepEvent,
-  TaskCompletedEvent,
-  TaskFailedEvent,
-  SubscribeTaskMessage,
-  SubscribedMessage,
 } from "../types";
 
 const API_BASE = "/api";
-const WS_BASE = typeof window !== "undefined" 
-  ? `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`
-  : "";
 
 // --- Generic API Client ---
 
@@ -82,11 +71,19 @@ class ApiClient {
     return this.request<Task[]>(`/tasks${params}`);
   }
 
-  async createTask(objective: string): Promise<TaskCreateResponse> {
-    return this.request<TaskCreateResponse>("/tasks", {
+  async createTask(objective: string): Promise<Task> {
+    return this.request<Task>("/tasks", {
       method: "POST",
       body: JSON.stringify({ objective }),
     });
+  }
+
+  async approveTask(id: number): Promise<Task> {
+    return this.request<Task>(`/tasks/${id}/approve`, { method: "POST" });
+  }
+
+  async rejectTask(id: number): Promise<Task> {
+    return this.request<Task>(`/tasks/${id}/reject`, { method: "POST" });
   }
 
   async getTask(id: number): Promise<Task> {
@@ -191,126 +188,10 @@ class ApiClient {
   }
 
   // --- Health ---
-  async healthCheck(): Promise<{ status: string; version: string }> {
-    return this.request<{ status: string; version: string }>("/health");
+  async healthCheck(): Promise<{ status: string; version: string; demo: boolean }> {
+    return this.request<{ status: string; version: string; demo: boolean }>("/health");
   }
 }
 
 // Export singleton instance
 export const api = new ApiClient();
-
-// --- WebSocket Client ---
-
-type WSMessageHandler = (message: WebSocketMessage) => void;
-
-export class WebSocketClient {
-  private ws: WebSocket | null = null;
-  private clientId: string;
-  private handlers: Set<WSMessageHandler> = new Set();
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;
-
-  constructor(clientId?: string) {
-    this.clientId = clientId || `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        resolve();
-        return;
-      }
-
-      const wsUrl = `${WS_BASE}/${this.clientId}`;
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
-        console.log("[WS] Connected");
-        this.reconnectAttempts = 0;
-        resolve();
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const message: WebSocketMessage = JSON.parse(event.data);
-          this.handlers.forEach((handler) => handler(message));
-        } catch (e) {
-          console.error("[WS] Failed to parse message:", e);
-        }
-      };
-
-      this.ws.onclose = () => {
-        console.log("[WS] Disconnected");
-        this.attemptReconnect();
-      };
-
-      this.ws.onerror = (error) => {
-        console.error("[WS] Error:", error);
-        if (this.ws?.readyState === WebSocket.CONNECTING) {
-          reject(error);
-        }
-      };
-    });
-  }
-
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.log("[WS] Max reconnect attempts reached");
-      return;
-    }
-
-    this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    
-    setTimeout(() => {
-      console.log(`[WS] Reconnecting (attempt ${this.reconnectAttempts})...`);
-      this.connect().catch(() => {});
-    }, delay);
-  }
-
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-
-  send(message: object): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn("[WS] Cannot send: not connected");
-    }
-  }
-
-  subscribe(handler: WSMessageHandler): () => void {
-    this.handlers.add(handler);
-    return () => this.handlers.delete(handler);
-  }
-
-  // Convenience methods
-  subscribeToTask(taskId: number): void {
-    this.send({ type: "subscribe_task", task_id: taskId } as SubscribeTaskMessage);
-  }
-}
-
-// Export singleton WebSocket client
-export const wsClient = new WebSocketClient();
-
-// --- Helper Functions ---
-
-export async function createWebSocket(clientId?: string): Promise<WebSocketClient> {
-  const client = new WebSocketClient(clientId);
-  await client.connect();
-  return client;
-}
-
-export function subscribeToConversation(ws: WebSocketClient, conversationId: string): void {
-  // Could be used for conversation-specific subscriptions
-  ws.send({ type: "subscribe_conversation", conversation_id: conversationId });
-}
-
-export function unsubscribeFromConversation(ws: WebSocketClient, conversationId: string): void {
-  ws.send({ type: "unsubscribe_conversation", conversation_id: conversationId });
-}

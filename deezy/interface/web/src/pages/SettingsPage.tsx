@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { Save, Loader2, AlertCircle, CheckCircle, Volume2, Mic, Brain, Shield, Bell, RotateCcw } from "lucide-react";
-import { useSettings, useApi } from "../hooks/useApi";
+import { useSettings, useApi, useHealth } from "../hooks/useApi";
 import type { Settings, LLMSettings, AgentSettings, VoiceSettings, ApprovalSettings } from "../types";
 
 const LLM_PROVIDERS = [
@@ -198,6 +198,18 @@ export function SettingsPage() {
 // --- Sub-components ---
 
 function LLMSettingsTab({ settings, onChange, availableModels }: { settings: LLMSettings; onChange: (s: LLMSettings) => void; availableModels: string[] }) {
+  const { health } = useHealth();
+  if (health?.demo) {
+    return (
+      <div className="p-6 space-y-2" data-testid="llm-demo-lock">
+        <h3 className="font-semibold text-lg">LLM Provider</h3>
+        <p className="text-sm text-muted">
+          This hosted demo runs a deterministic planner with simulated tools, so no model is configured here.
+          Run Deezy locally to use Ollama or OpenRouter.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="p-6 space-y-6">
       <div>

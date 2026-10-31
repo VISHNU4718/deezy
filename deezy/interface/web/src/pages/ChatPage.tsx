@@ -1,35 +1,41 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Send, Mic, Paperclip, Bot, Loader2, X, Check, AlertTriangle, Copy, ThumbsUp, ThumbsDown, Volume2, VolumeX, MicOff } from 'lucide-react';
-import { useTasks, useConversations, useTaskEvents } from '../hooks/useApi';
+import { Send, Mic, Bot, Loader2, X, Check, AlertTriangle, Copy, Volume2, VolumeX, MicOff } from 'lucide-react';
+import { useTasks, useConversations } from '../hooks/useApi';
 import { useSpeechRecognition, useSpeechSynthesis } from '../utils/voice';
-import type { ChatMessage, Task, TaskStep } from '../types';
+import type { ChatMessage, Task, TaskStatus, TaskStep } from '../types';
 import { format } from 'date-fns';
 
 export function ChatPage() {
   const params = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   const conversationId = params.conversationId;
-  const { createTask, getTask } = useTasks();
-  const { getConversation, addConversationMessage } = useConversations();
+  const { createTask, approveTask, rejectTask } = useTasks();
+  const { getConversation, createConversation, addConversationMessage } = useConversations();
+  const skipNextLoad = useRef<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
   const [showTaskPanel, setShowTaskPanel] = useState(false);
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load conversation messages when conversationId changes
   useEffect(() => {
+    if (conversationId && skipNextLoad.current === conversationId) {
+      // We just created this conversation and already hold its messages locally.
+      skipNextLoad.current = null;
+      return;
+    }
     if (conversationId) {
       const loadConversation = async () => {
         try {
           const conv = await getConversation(conversationId);
           if (conv.messages && conv.messages.length > 0) {
-            setMessages(conv.messages.map(m => ({ ...m, id: m.id || `msg_${Date.now()}` })) as ChatMessage[]);
+            setMessages(conv.messages.map((m, i) => ({ ...m, id: m.id || `msg_${i}` })) as ChatMessage[]);
           } else {
             setMessages([]);
           }
@@ -41,6 +47,7 @@ export function ChatPage() {
       loadConversation();
     } else {
       setMessages([]);
+      setCurrentTask(null);
     }
   }, [conversationId, getConversation]);
 
@@ -87,140 +94,96 @@ export function ChatPage() {
     },
   });
 
-  // Task events via WebSocket hook
-  const { plan, currentStep, completed, failed } = useTaskEvents(currentTask?.id || null);
-
-  // Sync task state with WebSocket events
-  useEffect(() => {
-    if (plan) {
-      setCurrentTask(prev => prev ? {
-        ...prev,
-        steps: plan.plan.map((p, i) => ({
-          step_id: p.step_id,
-          description: p.description,
-          tool: p.tool,
-          params: {},
-          verified: false,
-          risk_level: p.risk_level as 'low' | 'medium' | 'high',
-          status: i === 0 ? 'running' : 'pending',
-        })),
-        status: 'running',
-      } : null);
-    }
-  }, [plan]);
-
-  useEffect(() => {
-    if (currentStep) {
-      setCurrentTask(prev => prev ? {
-        ...prev,
-        steps: prev.steps.map(s =>
-          s.step_id === currentStep.step.step_id
-            ? { ...s, status: 'running' as const }
-            : s
-        ),
-      } : null);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (currentStep && currentStep.type === 'step_completed') {
-      setCurrentTask(prev => prev ? {
-        ...prev,
-        steps: prev.steps.map(s =>
-          s.step_id === currentStep.step.step_id
-            ? { ...s, ...currentStep.step, status: 'completed' as const, verified: true }
-            : s
-        ),
-      } : null);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (currentStep && currentStep.type === 'step_failed') {
-      setCurrentTask(prev => prev ? {
-        ...prev,
-        steps: prev.steps.map(s =>
-          s.step_id === currentStep.step.step_id
-            ? { ...s, ...currentStep.step, status: 'failed' as const, error: currentStep.error }
-            : s
-        ),
-      } : null);
-    }
-  }, [currentStep]);
-
-  useEffect(() => {
-    if (completed) {
-      setCurrentTask(prev => prev ? { ...prev, status: 'completed' as const, result: completed.result } : null);
-      setIsLoading(false);
-      if (completed.result?.message) {
-        setMessages(prev => [...prev, {
-          id: `msg_${Date.now()}`,
-          role: 'assistant',
-          content: completed.result.message,
-          timestamp: new Date().toISOString(),
-        }]);
-      }
-    }
-  }, [completed]);
-
-  useEffect(() => {
-    if (failed) {
-      setCurrentTask(prev => prev ? { ...prev, status: 'failed' as const } : null);
-      setIsLoading(false);
-      setMessages(prev => [...prev, {
-        id: `msg_${Date.now()}`,
-        role: 'assistant',
-        content: `Task failed: ${failed.error || 'Unknown error'}`,
-        timestamp: new Date().toISOString(),
-      }]);
-    }
-  }, [failed]);
-
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, currentTask]);
 
+  const activeConversation = useRef<string | undefined>(conversationId);
+  useEffect(() => {
+    activeConversation.current = conversationId;
+  }, [conversationId]);
+
+  const persist = async (role: 'user' | 'assistant', content: string) => {
+    const id = activeConversation.current;
+    if (!id) return;
+    try {
+      await addConversationMessage(id, { id: '', role, content, timestamp: '' });
+    } catch (e) {
+      // The hosted demo's storage is temporary; losing a saved message is not fatal.
+      console.warn('Failed to save message:', e);
+    }
+  };
+
+  const pushAssistant = (content: string, save = true) => {
+    setMessages(prev => [...prev, {
+      id: `msg_${Date.now()}_${prev.length}`,
+      role: 'assistant',
+      content,
+      timestamp: new Date().toISOString(),
+    }]);
+    if (save) void persist('assistant', content);
+    if (isVoiceEnabled && isTTSSupported) speak(content);
+  };
+
+  const showOutcome = (task: Task) => {
+    setCurrentTask(task);
+    setShowTaskPanel(true);
+    if (task.status === 'waiting_for_approval') {
+      pushAssistant('This plan has a step that changes something, so it is waiting for your approval below.', false);
+      return;
+    }
+    const message = (task.result as { message?: string } | undefined)?.message;
+    pushAssistant(message || (task.status === 'failed' ? 'The task failed.' : 'The task finished.'));
+  };
+
   const sendMessage = async () => {
     const text = input.trim() || transcript.trim();
     if (!text || isLoading) return;
 
-    const userMessage: ChatMessage = {
+    setMessages(prev => [...prev, {
       id: `msg_${Date.now()}`,
       role: 'user',
       content: text,
       timestamp: new Date().toISOString(),
-    };
-
-    setMessages(prev => [...prev, userMessage]);
+    }]);
     setInput('');
     setIsLoading(true);
-
-    // Cancel any ongoing TTS when user sends new message
+    setCurrentTask(null);
     cancelSpeaking();
 
     try {
-      const taskResult = await createTask(text);
-      setCurrentTask({
-        id: taskResult.task_id,
-        objective: text,
-        user_input: '',
-        status: 'planning',
-        created_at: new Date().toISOString(),
-        steps: [],
-        current_step_index: 0,
-        plan_version: 1,
-        risk_level: 'low',
-      });
-      setShowTaskPanel(true);
+      if (!activeConversation.current) {
+        const conv = await createConversation(text.slice(0, 60));
+        activeConversation.current = conv.id;
+        skipNextLoad.current = conv.id;
+        navigate(`/chat/${conv.id}`, { replace: true });
+      }
+      await persist('user', text);
+      showOutcome(await createTask(text));
     } catch (error) {
+      pushAssistant(`Error: ${error instanceof Error ? error.message : 'Failed to send message'}`, false);
+    } finally {
       setIsLoading(false);
-      setMessages(prev => [...prev, {
-        id: `msg_${Date.now()}`,
-        role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : 'Failed to send message'}`,
-        timestamp: new Date().toISOString(),
-      }]);
+    }
+  };
+
+  const decide = async (approve: boolean) => {
+    if (!currentTask) return;
+    setIsLoading(true);
+    try {
+      const task = approve ? await approveTask(currentTask.id) : await rejectTask(currentTask.id);
+      showOutcome(task);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Request failed';
+      pushAssistant(
+        /not found/i.test(message)
+          ? 'That task is no longer on the server. The hosted demo keeps its data in temporary storage that can reset, so please send the request again.'
+          : `Error: ${message}`,
+        false,
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -290,12 +253,6 @@ export function ChatPage() {
                     >
                       <Copy className="w-3.5 h-3.5" />
                     </button>
-                    <button className="p-1 hover:bg-background rounded transition" aria-label="Good response">
-                      <ThumbsUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button className="p-1 hover:bg-background rounded transition" aria-label="Bad response">
-                      <ThumbsDown className="w-3.5 h-3.5" />
-                    </button>
                   </>
                 )}
               </div>
@@ -324,6 +281,9 @@ export function ChatPage() {
       {currentTask && showTaskPanel && (
         <TaskPanel
           task={currentTask}
+          busy={isLoading}
+          onApprove={() => decide(true)}
+          onReject={() => decide(false)}
           onClose={() => setShowTaskPanel(false)}
         />
       )}
@@ -357,12 +317,6 @@ export function ChatPage() {
           )}
 
           <div className="flex items-end gap-2">
-            <button
-              className="p-2 rounded hover:bg-background transition"
-              aria-label="Attach file"
-            >
-              <Paperclip className="w-5 h-5 text-muted" />
-            </button>
             <textarea
               ref={textareaRef}
               value={input}
@@ -430,10 +384,13 @@ export function ChatPage() {
 
 interface TaskPanelProps {
   task: Task;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
   onClose: () => void;
 }
 
-function TaskPanel({ task, onClose }: TaskPanelProps) {
+function TaskPanel({ task, busy, onApprove, onReject, onClose }: TaskPanelProps) {
   const getStepStatusIcon = (step: TaskStep) => {
     switch (step.status) {
       case 'running':
@@ -443,6 +400,7 @@ function TaskPanel({ task, onClose }: TaskPanelProps) {
       case 'failed':
         return <AlertTriangle className="w-4 h-4 text-danger" />;
       case 'cancelled':
+      case 'skipped' as TaskStatus:
         return <X className="w-4 h-4 text-muted" />;
       default:
         return <div className="w-4 h-4 border-2 border-border rounded-full" />;
@@ -462,10 +420,8 @@ function TaskPanel({ task, onClose }: TaskPanelProps) {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div className="flex items-center gap-3">
-            <h3 className="font-semibold">Task Execution</h3>
-            <span className={`px-2 py-0.5 text-xs rounded ${getRiskColor(task.steps[0]?.risk_level || 'low')}`}>
-              {task.steps[0]?.risk_level || 'low'}
-            </span>
+            <h3 className="font-semibold">Task #{task.id}</h3>
+            <span className="px-2 py-0.5 text-xs rounded bg-background">{task.status.replace(/_/g, ' ')}</span>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-background rounded transition">
             <X className="w-5 h-5" />
@@ -482,7 +438,13 @@ function TaskPanel({ task, onClose }: TaskPanelProps) {
                 <div className="flex items-center gap-2 text-sm">
                   <span className="font-medium truncate">{step.description}</span>
                   <span className="px-1.5 py-0.5 text-xs bg-background rounded">{step.tool}</span>
+                  <span className={`px-1.5 py-0.5 text-xs rounded ${getRiskColor(step.risk_level)}`}>{step.risk_level}</span>
                 </div>
+                {task.status === 'waiting_for_approval' && Object.keys(step.params || {}).length > 0 && (
+                  <pre className="mt-1 text-xs bg-background p-2 rounded overflow-auto max-h-24">
+                    {JSON.stringify(step.params, null, 2)}
+                  </pre>
+                )}
                 {step.error && (
                   <p className="text-xs text-danger mt-1">{step.error}</p>
                 )}
@@ -499,11 +461,29 @@ function TaskPanel({ task, onClose }: TaskPanelProps) {
           ))}
         </div>
 
+        {task.status === 'waiting_for_approval' && (
+          <div className="p-4 border-t border-border flex gap-2 justify-end">
+            <button
+              onClick={onReject}
+              disabled={busy}
+              className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-background disabled:opacity-50"
+            >
+              Reject
+            </button>
+            <button
+              onClick={onApprove}
+              disabled={busy}
+              className="px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary-hover disabled:opacity-50"
+            >
+              Approve and run
+            </button>
+          </div>
+        )}
         {task.status === 'completed' && (
           <div className="p-4 border-t border-border bg-success/5">
             <div className="flex items-center gap-2 text-success">
               <Check className="w-5 h-5" />
-              <span className="font-medium">Task completed successfully</span>
+              <span className="font-medium">Task completed</span>
             </div>
           </div>
         )}

@@ -57,7 +57,7 @@ export function ConversationSidebar({
 
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+  }, [loadConversations, currentConversationId]);
 
   const filteredConversations = conversations.filter(conv => 
     conv.title.toLowerCase().includes(search.toLowerCase())

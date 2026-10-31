@@ -1,11 +1,11 @@
 """
 Brain models and data structures for Deezy.
 """
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from enum import Enum
-from datetime import datetime
+
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 
 class ToolCategory(str, Enum):
@@ -96,12 +96,8 @@ class BaseTool(ABC):
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required
-                }
-            }
+                "parameters": {"type": "object", "properties": properties, "required": required},
+            },
         }
 
 
@@ -167,9 +163,10 @@ def create_tool_from_function(
     func,
     category: ToolCategory = ToolCategory.SYSTEM,
     risk_level: RiskLevel = RiskLevel.LOW,
-    parameters: List[ToolParameter] = None
+    parameters: List[ToolParameter] = None,
 ) -> BaseTool:
     """Create a tool from a function."""
+
     class FunctionTool(BaseTool):
         def __init__(self):
             self.name = name
@@ -196,15 +193,15 @@ def tool(
     description: str,
     category: ToolCategory = ToolCategory.SYSTEM,
     risk_level: RiskLevel = RiskLevel.LOW,
-    parameters: List[ToolParameter] = None
+    parameters: List[ToolParameter] = None,
 ):
     """Decorator to create a tool from a function."""
+
     def decorator(func):
-        tool_instance = create_tool_from_function(
-            name, description, func, category, risk_level, parameters
-        )
+        tool_instance = create_tool_from_function(name, description, func, category, risk_level, parameters)
         register_tool(tool_instance)
         return tool_instance
+
     return decorator
 
 

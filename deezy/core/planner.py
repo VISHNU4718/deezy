@@ -2,17 +2,22 @@
 Planner for Deezy.
 Creates multi-step plans from objectives using LLM or heuristics.
 """
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
-from datetime import datetime
-from brain.models import TaskStatus, RiskLevel
+
 import json
+import logging
 import re
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class PlanStep:
     """A single step in a plan."""
+
     step_id: str
     description: str
     tool: str
@@ -26,10 +31,32 @@ class PlanStep:
     depends_on: List[str] = field(default_factory=list)
     verification_criteria: str = ""
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "description": self.description,
+            "tool": self.tool,
+            "params": self.params,
+            "expected_result": self.expected_result,
+            "status": self.status,
+            "result": self.result,
+            "error": self.error,
+            "risk_level": self.risk_level,
+            "requires_approval": self.requires_approval,
+            "depends_on": self.depends_on,
+            "verification_criteria": self.verification_criteria,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PlanStep":
+        names = cls.__dataclass_fields__.keys()
+        return cls(**{k: v for k, v in data.items() if k in names})
+
 
 @dataclass
 class Plan:
     """A complete plan with multiple steps."""
+
     plan_id: str
     objective: str
     steps: List[PlanStep] = field(default_factory=list)
@@ -39,6 +66,22 @@ class Plan:
     metadata: Dict[str, Any] = field(default_factory=dict)
     requires_approval: bool = False
     version: int = 1
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "plan_id": self.plan_id,
+            "objective": self.objective,
+            "status": self.status,
+            "requires_approval": self.requires_approval,
+            "steps": [s.to_dict() for s in self.steps],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Plan":
+        plan = cls(plan_id=data["plan_id"], objective=data["objective"], status=data.get("status", "pending"))
+        plan.steps = [PlanStep.from_dict(s) for s in data.get("steps", [])]
+        plan.requires_approval = data.get("requires_approval", False)
+        return plan
 
 
 class Planner:
@@ -50,25 +93,21 @@ class Planner:
 
     def create_plan(self, objective: str, context: str = "") -> Plan:
         """Create a plan from an objective."""
-        plan_id = f"plan_{int(datetime.now().timestamp())}"
+        plan_id = f"plan_{uuid.uuid4().hex[:10]}"
         plan = Plan(plan_id=plan_id, objective=objective)
 
-        # Check for simple queries that should use heuristic planner
-        if self._is_simple_query(objective):
-            steps = self._create_heuristic_plan(objective, context)
-        # Try LLM-based planning first, fallback to heuristic
-        elif self.llm_provider and self.available_tools:
+        if self._use_llm(objective):
             try:
                 steps = self._create_llm_plan(objective, context)
             except Exception as e:
-                print(f"[PLAN] LLM planning failed, falling back to heuristic: {e}")
-                steps = self._create_heuristic_plan(objective, context)
+                logger.warning("LLM planning failed, using keyword plan: %s", e)
+                steps = self._create_heuristic_plan(objective)
         else:
-            steps = self._create_heuristic_plan(objective, context)
+            steps = self._create_heuristic_plan(objective)
 
         for i, step_data in enumerate(steps):
             step = PlanStep(
-                step_id=f"step_{i+1}",
+                step_id=f"step_{i + 1}",
                 description=step_data["description"],
                 tool=step_data["tool"],
                 params=step_data.get("params", {}),
@@ -76,7 +115,7 @@ class Planner:
                 risk_level=step_data.get("risk_level", "low"),
                 requires_approval=step_data.get("requires_approval", False),
                 depends_on=step_data.get("depends_on", []),
-                verification_criteria=step_data.get("verification_criteria", "")
+                verification_criteria=step_data.get("verification_criteria", ""),
             )
             plan.steps.append(step)
 
@@ -87,19 +126,21 @@ class Planner:
 
     def _create_llm_plan(self, objective: str, context: str) -> List[Dict]:
         """Create a plan using the LLM."""
-        from brain.provider import Message, MessageRole
+        from deezy.brain.provider import Message, MessageRole
 
         # Build tool descriptions for the LLM
         tool_descriptions = []
         for tool in self.available_tools:
             fn = tool.get("function", {})
-            tool_descriptions.append({
-                "name": fn.get("name", ""),
-                "description": fn.get("description", ""),
-                "parameters": fn.get("parameters", {}),
-                "category": tool.get("category", "system"),
-                "risk_level": tool.get("risk_level", "low")
-            })
+            tool_descriptions.append(
+                {
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "parameters": fn.get("parameters", {}),
+                    "category": tool.get("category", "system"),
+                    "risk_level": tool.get("risk_level", "low"),
+                }
+            )
 
         tools_json = json.dumps(tool_descriptions, indent=2)
 
@@ -113,7 +154,7 @@ class Planner:
             "2. Each step must specify: description, tool, params, expected_result, risk_level (low/medium/high)\n"
             "3. risk_level determines approval: low=auto, medium=ask initially, high=always ask\n"
             "4. requires_approval = true for medium/high risk tools\n"
-            "5. Chain steps logically - later steps can reference previous results with {step_N_result}\n"
+            "5. Chain steps logically - later steps can reference earlier results with {{step_1_result.field[0].subfield}}\n"
             "6. Add depends_on for explicit step dependencies using step IDs (step_1, step_2, etc.)\n"
             "7. Add verification_criteria to specify how to verify step completion\n"
             "7. Prefer fewer steps when possible\n"
@@ -129,7 +170,7 @@ class Planner:
 
         messages = [
             Message(role=MessageRole.SYSTEM, content=system_prompt),
-            Message(role=MessageRole.USER, content=user_prompt)
+            Message(role=MessageRole.USER, content=user_prompt),
         ]
 
         response = self.llm_provider.chat(messages)
@@ -164,288 +205,120 @@ class Planner:
 
         return steps
 
-    def _is_simple_query(self, objective: str) -> bool:
-        """Check if objective is a simple query that should use heuristic planning."""
-        obj_lower = objective.lower().strip()
-        simple_patterns = [
-            "what time", "what's the time", "whats the time", "current time",
-            "tell me the time", "what is the time", "time is it",
-            "what date", "what's the date", "whats the date", "today's date",
-            "todays date", "what is the date", "current date", "today is",
-            "system info", "system information", "hardware specs",
-            "running apps", "running applications", "processes",
-            "active window", "foreground window",
-        ]
-        return any(pattern in obj_lower for pattern in simple_patterns)
+    def _use_llm(self, objective: str) -> bool:
+        """Use the LLM only when a real provider is configured."""
+        from deezy.brain.provider import MockProvider
 
-    def _create_heuristic_plan(self, objective: str, context: str) -> List[Dict]:
-        """Create a simple heuristic-based plan."""
-        obj_lower = objective.lower()
+        if not self.llm_provider or not self.available_tools:
+            return False
+        return not isinstance(self.llm_provider, MockProvider)
 
-        # HIGH-CONFIDENCE ROUTING: Time/Date queries (must come FIRST)
-        time_keywords = [
-            "what time", "what's the time", "whats the time", "current time",
-            "tell me the time", "what is the time", "time is it",
-            "what date", "what's the date", "whats the date", "today's date",
-            "todays date", "what is the date", "current date", "today is"
-        ]
-        if any(kw in obj_lower for kw in time_keywords):
-            return [
-                {
-                    "description": f"Get current time and date for: {objective}",
-                    "tool": "get_current_time",
-                    "params": {},
-                    "expected_result": "Current local date, time, timezone, and day of week",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": [],
-                    "verification_criteria": "Current time returned with date, time, timezone, day of week"
-                }
-            ]
+    def _tool_names(self) -> set:
+        return {t.get("function", {}).get("name") for t in self.available_tools}
 
-        # System info / apps
-        if any(kw in obj_lower for kw in ["system", "computer", "hardware", "specs", "info"]):
-            return [
-                {
-                    "description": f"Get system information for: {objective}",
-                    "tool": "get_system_info",
-                    "params": {"detail_level": "basic"},
-                    "expected_result": "System specifications",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": [],
-                    "verification_criteria": "System info returned with CPU, memory, disk, OS"
-                }
-            ]
+    def _create_heuristic_plan(self, objective: str) -> List[Dict]:
+        """
+        Keyword-based planning over the registered tools. Not an LLM: it maps
+        a handful of phrases to tools and falls back to a product search.
+        """
+        text = objective.lower()
+        available = self._tool_names()
 
-        if any(kw in obj_lower for kw in ["running", "apps", "applications", "processes", "programs"]):
-            return [
-                {
-                    "description": f"List running applications: {objective}",
-                    "tool": "list_running_apps",
-                    "params": {"limit": 20, "sort_by": "cpu"},
-                    "expected_result": "List of running applications",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": [],
-                    "verification_criteria": "Running apps returned with PID, name, CPU, memory"
-                }
-            ]
-
-        if any(kw in obj_lower for kw in ["active", "window", "foreground", "focused"]):
-            return [
-                {
-                    "description": f"Get active window: {objective}",
-                    "tool": "get_active_window",
-                    "params": {},
-                    "expected_result": "Active window information",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": [],
-                    "verification_criteria": "Active window returned with title, process, PID"
-                }
-            ]
-
-        # Application control
-        if any(kw in obj_lower for kw in ["open", "launch", "start", "run"]):
-            app_name = objective.lower().replace("open", "").replace("launch", "").replace("start", "").replace("run", "").strip()
-            return [
-                {
-                    "description": f"Open application: {app_name}",
-                    "tool": "open_application",
-                    "params": {"app": app_name},
-                    "expected_result": "Application launched",
-                    "risk_level": "medium",
-                    "requires_approval": True,
-                    "depends_on": [],
-                    "verification_criteria": "Application launched successfully"
-                }
-            ]
-
-        if any(kw in obj_lower for kw in ["close", "quit", "kill", "stop"]):
-            app_name = objective.lower().replace("close", "").replace("quit", "").replace("kill", "").replace("stop", "").strip()
-            return [
-                {
-                    "description": f"Close application: {app_name}",
-                    "tool": "close_application",
-                    "params": {"app": app_name, "confirm": True},
-                    "expected_result": "Application closed",
-                    "risk_level": "high",
-                    "requires_approval": True,
-                    "depends_on": [],
-                    "verification_criteria": "Application process terminated"
-                }
-            ]
-
-        # File operations
-        if any(kw in obj_lower for kw in ["file", "folder", "directory", "organize"]):
-            if "create" in obj_lower or "make" in obj_lower or "new" in obj_lower:
-                if "folder" in obj_lower or "directory" in obj_lower:
-                    return [
-                        {
-                            "description": f"Create folder: {objective}",
-                            "tool": "create_folder",
-                            "params": {"path": "~/Desktop/new_folder", "parents": True},
-                            "expected_result": "Folder created",
-                            "risk_level": "low",
-                            "requires_approval": False,
-                            "depends_on": [],
-                            "verification_criteria": "Folder created at specified path"
-                        }
-                    ]
-                else:
-                    return [
-                        {
-                            "description": f"Create file: {objective}",
-                            "tool": "create_file",
-                            "params": {"path": "~/Desktop/new_file.txt", "content": ""},
-                            "expected_result": "File created",
-                            "risk_level": "medium",
-                            "requires_approval": True,
-                            "depends_on": [],
-                            "verification_criteria": "File created at specified path"
-                        }
-                    ]
-
-            if "read" in obj_lower:
-                return [
-                    {
-                        "description": f"Read file: {objective}",
-                        "tool": "read_file",
-                        "params": {"path": "~/Desktop/test.txt"},
-                        "expected_result": "File contents",
-                        "risk_level": "low",
-                        "requires_approval": False,
-                        "depends_on": [],
-                        "verification_criteria": "File contents returned"
-                    }
-                ]
-
-            if "write" in obj_lower or "save" in obj_lower:
-                return [
-                    {
-                        "description": f"Write file: {objective}",
-                        "tool": "create_file",
-                        "params": {"path": "~/Desktop/new_file.txt", "content": ""},
-                        "expected_result": "File written",
-                        "risk_level": "medium",
-                        "requires_approval": True,
-                        "depends_on": [],
-                        "verification_criteria": "File written successfully"
-                    }
-                ]
-
-            if any(kw in obj_lower for kw in ["rename", "move"]):
-                return [
-                    {
-                        "description": f"Rename/move file: {objective}",
-                        "tool": "rename_file",
-                        "params": {"src": "~/Desktop/old.txt", "dst": "~/Desktop/new.txt"},
-                        "expected_result": "File renamed/moved",
-                        "risk_level": "medium",
-                        "requires_approval": True,
-                        "depends_on": [],
-                        "verification_criteria": "File renamed/moved successfully"
-                    }
-                ]
-
-            if "folder" in obj_lower or "directory" in obj_lower:
-                return [
-                    {
-                        "description": f"Create folder: {objective}",
-                        "tool": "create_folder",
-                        "params": {"path": "~/Desktop/new_folder", "parents": True},
-                        "expected_result": "Folder created",
-                        "risk_level": "low",
-                        "requires_approval": False,
-                        "depends_on": [],
-                        "verification_criteria": "Folder created at specified path"
-                    }
-                ]
-
-            if "search" in obj_lower or "find" in obj_lower:
-                return [
-                    {
-                        "description": f"Search for files: {objective}",
-                        "tool": "search_files",
-                        "params": {"path": "~/Desktop", "pattern": "*", "recursive": True},
-                        "expected_result": "List of matching files",
-                        "risk_level": "low",
-                        "requires_approval": False,
-                        "depends_on": [],
-                        "verification_criteria": "Matching files returned"
-                    }
-                ]
-
-        # Product research related
-        if any(kw in obj_lower for kw in ["find", "search", "discover", "product", "lamp", "desk", "chair", "monitor", "research"]):
-            return [
-                {
-                    "description": f"Search for products related to: {objective}",
-                    "tool": "search_products",
-                    "params": {"query": objective, "limit": 10},
-                    "expected_result": "List of relevant products",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": [],
-                    "verification_criteria": "Products returned with title, price, ASIN"
-                },
-                {
-                    "description": "Evaluate found products against criteria",
-                    "tool": "evaluate_product",
-                    "params": {"asin": "{{step_1_result[0].asin}}", "criteria": "relevance,price,quality"},
-                    "expected_result": "Product scores and recommendations",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": ["step_1"],
-                    "verification_criteria": "Product evaluation returned with scores and recommendation"
-                }
-            ]
-
-        # System info
-        if any(kw in obj_lower for kw in ["system", "computer", "hardware", "specs", "cpu", "ram", "gpu", "disk"]):
-            return [
-                {
-                    "description": f"Get system information for: {objective}",
-                    "tool": "get_system_info",
-                    "params": {"detail_level": "basic"},
-                    "expected_result": "System specifications",
-                    "risk_level": "low",
-                    "requires_approval": False,
-                    "depends_on": [],
-                    "verification_criteria": "System info returned with CPU, memory, disk, OS"
-                }
-            ]
-
-        # Application control
-        if any(kw in obj_lower for kw in ["open", "launch", "start", "run", "app", "application"]):
-            app_name = objective.lower().replace("open", "").replace("launch", "").replace("start", "").replace("run", "").strip()
-            return [
-                {
-                    "description": f"Open application: {app_name}",
-                    "tool": "open_application",
-                    "params": {"app": app_name},
-                    "expected_result": "Application launched",
-                    "risk_level": "medium",
-                    "requires_approval": True,
-                    "depends_on": [],
-                    "verification_criteria": "Application launched successfully"
-                }
-            ]
-
-        # Default: search products
-        return [
-            {
-                "description": f"Search for information about: {objective}",
-                "tool": "search_products",
-                "params": {"query": objective, "limit": 5},
-                "expected_result": "Relevant information",
-                "risk_level": "low",
-                "requires_approval": False,
-                "depends_on": [],
-                "verification_criteria": "Search results returned"
+        def step(tool: str, description: str, params: Optional[Dict] = None, expected: str = "") -> Dict:
+            return {
+                "tool": tool,
+                "description": description,
+                "params": params or {},
+                "expected_result": expected or description,
+                "verification_criteria": f"{tool} returns data",
             }
-        ]
+
+        def has(*words: str) -> bool:
+            return any(w in text for w in words)
+
+        if has("time", "date", "day is it", "today"):
+            plan = [step("get_current_time", "Get the current date and time")]
+        elif has("system info", "system information", "hardware", "cpu", "memory usage", "specs"):
+            plan = [step("get_system_info", "Get system information")]
+        elif has("running app", "running process", "processes", "what is running", "what's running"):
+            plan = [step("list_running_apps", "List running processes")]
+        elif has("read file", "open file", "show file", "read the file", "cat ") or (
+            re.search(r"\b(read|open|show|view|display)\b", text) and self._extract_path(objective)
+        ):
+            path = self._extract_path(objective) or "welcome.txt"
+            plan = [step("read_file", f"Read {path}", {"path": path})]
+        elif has("create file", "write file", "make a file", "save a file", "create a file", "new file") or (
+            re.search(r"\b(create|write|make|save)\b", text) and self._extract_path(objective)
+        ):
+            path = self._extract_path(objective) or "note.txt"
+            plan = [step("create_file", f"Create {path}", {"path": path, "content": self._extract_content(objective)})]
+        elif has("find file", "search file", "list file", "files"):
+            pattern = self._extract_glob(objective) or "*"
+            plan = [step("search_files", f"Search for files matching {pattern}", {"pattern": pattern})]
+        elif has(
+            "add task", "add a task", "create task", "create a task", "remind me", "todo", "to-do", "add to my list"
+        ):
+            title = (
+                re.sub(
+                    r"^(please\s+)?(add|create)( a)? (task|todo|to-do)( to)?:?\s*|^remind me to\s*",
+                    "",
+                    objective.strip(),
+                    flags=re.I,
+                )
+                or objective
+            )
+            plan = [step("create_task", "Add an item to the to-do list", {"title": title[:200]})]
+        elif has("list task", "show task", "my tasks", "show my list", "todo list", "to-do list"):
+            plan = [step("list_tasks", "List to-do items")]
+        elif has("search the web", "web search", "google ", "look up online", "search online"):
+            plan = [step("search_web", "Search the web (canned results)", {"query": objective[:200]})]
+        else:
+            params: Dict[str, Any] = {"query": objective[:200], "limit": 5}
+            m = re.search(r"(?:under|below|less than|max(?:imum)?|up to|<)\s*\$?\s*(\d+(?:\.\d+)?)", text)
+            if m:
+                params["max_price"] = float(m.group(1))
+            plan = [
+                step("search_products", "Search the product catalog", params, "Matching products"),
+                step(
+                    "evaluate_product",
+                    "Evaluate the top result",
+                    {"asin": "{{step_1_result.products[0].asin}}"},
+                    "Score for the top product",
+                ),
+            ]
+            plan[1]["depends_on"] = ["step_1"]
+
+        missing = [p["tool"] for p in plan if p["tool"] not in available]
+        if missing:
+            raise ValueError(f"Tool not available in this deployment: {', '.join(missing)}")
+        return plan
+
+    @staticmethod
+    def _extract_path(objective: str) -> Optional[str]:
+        quoted = re.search(r"[\"'`]([^\"'`]+)[\"'`]", objective)
+        if quoted and ("." in quoted.group(1) or "/" in quoted.group(1)):
+            return quoted.group(1)
+        m = re.search(r"([\w./\\-]+\.[A-Za-z0-9]{1,6})\b", objective)
+        return m.group(1) if m else None
+
+    @staticmethod
+    def _extract_content(objective: str) -> str:
+        m = re.search(r"(?:with (?:content|text)|containing)\s*:?\s*[\"']?(.+?)[\"']?$", objective, flags=re.I)
+        return m.group(1) if m else ""
+
+    @staticmethod
+    def _extract_glob(objective: str) -> Optional[str]:
+        m = re.search(r"(\*\.[A-Za-z0-9]+|\*[\w.-]*\*?)", objective)
+        if m:
+            return m.group(1)
+        m = re.search(r"\.([A-Za-z0-9]{2,5})\s+files|\b([a-z0-9]{2,5}) files", objective.lower())
+        if m:
+            ext = m.group(1) or m.group(2)
+            if ext not in {"my", "the", "all", "some", "any", "find", "list", "text"}:
+                return f"*.{ext}"
+            if ext == "text":
+                return "*.txt"
+        return None
 
     def update_plan(self, plan: Plan, step_id: str, result: Any, error: str = None):
         """Update plan with step result."""
@@ -459,34 +332,3 @@ class Planner:
                     step.result = result
                 break
         plan.updated_at = datetime.now()
-
-    def replan(
-        self,
-        current_plan: Plan,
-        completed_step_ids: List[str],
-        failed_step_id: str = None,
-        failure_reason: str = None,
-        context: str = ""
-    ) -> Plan:
-        """Create a new plan after a failure."""
-        new_plan = Plan(
-            plan_id=f"replan_{int(datetime.now().timestamp())}",
-            objective=current_plan.objective
-        )
-        
-        # Copy completed steps
-        for step in current_plan.steps:
-            if step.step_id in completed_step_ids:
-                new_plan.steps.append(step)
-            elif step.step_id == failed_step_id:
-                # Replace failed step with alternative
-                pass
-            else:
-                # Keep pending steps
-                new_plan.steps.append(step)
-        
-        new_plan.version = current_plan.version + 1
-        return new_plan
-
-
-__all__ = ["Plan", "PlanStep", "Planner"]
