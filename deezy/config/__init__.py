@@ -1,8 +1,9 @@
 import os
-import yaml
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
-from dataclasses import dataclass, field
+
+import yaml
 
 
 @dataclass
@@ -71,11 +72,11 @@ class LoggingSettings:
 
 @dataclass
 class WebsiteSettings:
-    root_path: str = "C:/Users/beern/deeztop"
-    data_path: str = "C:/Users/beern/deeztop/data"
-    templates_path: str = "C:/Users/beern/deeztop"
+    root_path: str = ""
+    data_path: str = ""
+    templates_path: str = ""
     categories: list = field(default_factory=list)
-    affiliate_tag: str = "vishnubeer-21"
+    affiliate_tag: str = ""
 
 
 @dataclass
@@ -108,10 +109,17 @@ class Settings:
     external_apis: ExternalAPISettings = field(default_factory=ExternalAPISettings)
 
 
+def is_demo() -> bool:
+    """True for the hosted, sandboxed demo: DEEZY_DEMO=1, or any Vercel deployment."""
+    return os.environ.get("DEEZY_DEMO", "").lower() in ("1", "true", "yes") or bool(os.environ.get("VERCEL"))
+
+
 def load_config(config_path: Optional[str] = None) -> Settings:
     """Load configuration from YAML file with environment variable substitution."""
     if config_path is None:
-        config_path = os.environ.get("DEEZY_CONFIG", "config/settings.yaml")
+        config_path = os.environ.get("DEEZY_CONFIG") or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "settings.yaml"
+        )
 
     path = Path(config_path)
     if not path.is_absolute():
@@ -127,6 +135,7 @@ def load_config(config_path: Optional[str] = None) -> Settings:
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
         from dotenv import load_dotenv
+
         load_dotenv(env_path)
 
     # Substitute environment variables
@@ -189,9 +198,20 @@ def load_config(config_path: Optional[str] = None) -> Settings:
     if "external_apis" in raw:
         settings.external_apis = ExternalAPISettings(**raw["external_apis"])
 
+    # Environment overrides
+    if os.environ.get("DEEZY_LLM_PROVIDER"):
+        settings.llm.provider = os.environ["DEEZY_LLM_PROVIDER"].lower()
+    if is_demo():
+        # The hosted demo never calls an LLM and never reaches the network.
+        settings.llm.provider = "mock"
+        settings.llm.model = "mock-model"
+        # Show the approval flow: medium-risk steps (e.g. creating a file) must be approved.
+        settings.agent.approval_required_for_medium_risk = True
+    if os.environ.get("AFFILIATE_TAG"):
+        settings.website.affiliate_tag = os.environ["AFFILIATE_TAG"]
+
     # Apply cost constraint from identity or env
-    max_cost = int(os.environ.get("MAX_MONTHLY_COST",
-                    settings.app.get("max_monthly_cost", 0)))
+    max_cost = int(os.environ.get("MAX_MONTHLY_COST", settings.app.get("max_monthly_cost", 0)))
     settings.app["max_monthly_cost"] = max_cost
 
     return settings

@@ -1,12 +1,12 @@
 # Deezy Configuration
-# Copy to config/local.yaml and customize for your environment
+# Override the file with DEEZY_CONFIG=/path/to/other.yaml
 
 # Application
 app:
   name: "deezy"
   version: "0.1.0"
   environment: "development"  # development, staging, production
-  debug: true
+  debug: false
   max_monthly_cost: 0  # ₹0/month - hard constraint, enforced at runtime
 
 # Database
@@ -143,7 +143,7 @@ approval:
 
 # Logging
 logging:
-  level: "DEBUG"  # DEBUG, INFO, WARNING, ERROR
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
   format: "json"  # json, text
   file: "data/deezy.log"
   max_file_size_mb: 10
@@ -152,9 +152,9 @@ logging:
 
 # Website Integration (Deeztop)
 website:
-  root_path: "C:/Users/beern/deeztop"
-  data_path: "C:/Users/beern/deeztop/data"
-  templates_path: "C:/Users/beern/deezy/deeztop"
+  root_path: "../deeztop"
+  data_path: "../deeztop/data"
+  templates_path: "../deeztop"
   categories:
     - "desk-accessories"
     - "lighting-ambience"
@@ -162,7 +162,7 @@ website:
     - "storage-shelving"
     - "chairs-ergonomics"
     - "study-dorm"
-  affiliate_tag: "vishnubeer-21"
+  affiliate_tag: ""  # or set AFFILIATE_TAG in the environment
 
 # Product Evaluation Scoring
 scoring:

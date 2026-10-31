@@ -2,17 +2,20 @@
 Memory management for Deezy.
 Handles short-term conversation context and persistent long-term memory.
 """
+
 import json
-from datetime import datetime
-from typing import List, Dict, Any, Optional, List
 from dataclasses import dataclass, field
-from memory.database import get_db, init_db
-from config import get_settings
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from deezy.config import get_settings
+from deezy.memory.database import get_db, init_db
 
 
 @dataclass
 class ConversationTurn:
     """A single turn in a conversation."""
+
     role: str  # user, assistant, tool
     content: str
     timestamp: datetime = field(default_factory=datetime.now)
@@ -22,6 +25,7 @@ class ConversationTurn:
 @dataclass
 class MemoryEntry:
     """A persistent memory entry."""
+
     id: Optional[int] = None
     category: str = ""  # fact, preference, project, task, decision, observation
     content: str = ""
@@ -44,16 +48,12 @@ class ShortTermMemory:
 
     def add_turn(self, role: str, content: str, metadata: Dict = None):
         """Add a conversation turn."""
-        turn = ConversationTurn(
-            role=role,
-            content=content,
-            metadata=metadata or {}
-        )
+        turn = ConversationTurn(role=role, content=content, metadata=metadata or {})
         self.turns.append(turn)
 
         # Trim to max turns
         if len(self.turns) > self.max_turns:
-            self.turns = self.turns[-self.max_turns:]
+            self.turns = self.turns[-self.max_turns :]
 
     def get_recent_turns(self, n: int = 10) -> List[ConversationTurn]:
         """Get last N turns."""
@@ -85,25 +85,28 @@ class LongTermMemory:
     def store(self, entry: MemoryEntry) -> int:
         """Store a memory entry."""
         with self.db.transaction() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 INSERT INTO memories (category, content, tags, importance, source, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                entry.category,
-                entry.content,
-                json.dumps(entry.tags),
-                entry.importance,
-                entry.source,
-                entry.created_at,
-                entry.updated_at
-            ))
+            """,
+                (
+                    entry.category,
+                    entry.content,
+                    json.dumps(entry.tags),
+                    entry.importance,
+                    entry.source,
+                    entry.created_at,
+                    entry.updated_at,
+                ),
+            )
             entry.id = cursor.lastrowid
             return entry.id
 
-    def retrieve(self, query: str = "", category: str = None,
-                 limit: int = 10, min_importance: float = 0.0) -> List[MemoryEntry]:
+    def retrieve(
+        self, query: str = "", category: str = None, limit: int = 10, min_importance: float = 0.0
+    ) -> List[MemoryEntry]:
         """Retrieve relevant memories."""
-        query_parts = []
         params = []
 
         # Build query
@@ -135,45 +138,40 @@ class LongTermMemory:
     def _row_to_memory(self, row) -> MemoryEntry:
         """Convert database row to MemoryEntry."""
         return MemoryEntry(
-            id=row['id'],
-            category=row['category'],
-            content=row['content'],
-            tags=json.loads(row['tags']) if row['tags'] else [],
-            importance=row['importance'],
-            source=row['source'],
-            created_at=row['created_at'],
-            updated_at=row['updated_at'],
-            access_count=row['access_count'],
-            last_accessed=row['last_accessed']
+            id=row["id"],
+            category=row["category"],
+            content=row["content"],
+            tags=json.loads(row["tags"]) if row["tags"] else [],
+            importance=row["importance"],
+            source=row["source"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            access_count=row["access_count"],
+            last_accessed=row["last_accessed"],
         )
 
     def update_access(self, memory_id: int):
         """Update access statistics."""
-        self.db.execute("""
+        self.db.execute(
+            """
             UPDATE memories
             SET access_count = access_count + 1,
                 last_accessed = ?
             WHERE id = ?
-        """, (datetime.now(), memory_id))
-
-    def add_fact(self, content: str, category: str = "fact",
-                 importance: float = 1.0, tags: List[str] = None) -> int:
-        """Quick add a fact."""
-        entry = MemoryEntry(
-            category=category,
-            content=content,
-            tags=tags or [],
-            importance=importance,
-            source="user"
+        """,
+            (datetime.now(), memory_id),
         )
+
+    def add_fact(self, content: str, category: str = "fact", importance: float = 1.0, tags: List[str] = None) -> int:
+        """Quick add a fact."""
+        entry = MemoryEntry(category=category, content=content, tags=tags or [], importance=importance, source="user")
         return self.store(entry)
 
     def add_preference(self, content: str, importance: float = 0.8) -> int:
         """Add a user preference."""
         return self.add_fact(content, "preference", importance, ["preference"])
 
-    def add_observation(self, content: str, category: str = "observation",
-                        importance: float = 0.7) -> int:
+    def add_observation(self, content: str, category: str = "observation", importance: float = 0.7) -> int:
         """Add an observation."""
         return self.add_fact(content, category, importance, ["observation"])
 
@@ -193,14 +191,10 @@ class MemoryManager:
         # Also store important exchanges in long-term memory
         if role == "user" and len(content) > 20:
             self.long_term.add_fact(
-                f"User said: {content}",
-                category="conversation",
-                importance=0.5,
-                tags=["conversation", "user_input"]
+                f"User said: {content}", category="conversation", importance=0.5, tags=["conversation", "user_input"]
             )
 
-    def get_context_for_llm(self, max_short_term: int = 10,
-                            max_long_term: int = 5) -> str:
+    def get_context_for_llm(self, max_short_term: int = 10, max_long_term: int = 5) -> str:
         """Build context string for LLM with both memory types."""
         parts = []
 
@@ -218,23 +212,18 @@ class MemoryManager:
 
         return "\n\n".join(parts) if parts else "No previous context."
 
-    def remember(self, content: str, category: str = "fact",
-                 importance: float = 1.0, tags: List[str] = None) -> int:
+    def remember(self, content: str, category: str = "fact", importance: float = 1.0, tags: List[str] = None) -> int:
         """Store something in long-term memory."""
-        return self.long_term.add_fact(content, category, importance)
+        return self.long_term.add_fact(content, category, importance, tags)
 
-    def recall(self, query: str = "", category: str = None,
-               limit: int = 5) -> List[MemoryEntry]:
+    def recall(self, query: str = "", category: str = None, limit: int = 5) -> List[MemoryEntry]:
         """Recall relevant memories."""
         return self.long_term.retrieve(query, category, limit)
 
     def get_conversation_history(self, limit: int = 20) -> List[Dict]:
         """Get formatted conversation history."""
         turns = self.short_term.get_recent_turns(limit)
-        return [
-            {"role": t.role, "content": t.content, "timestamp": t.timestamp.isoformat()}
-            for t in turns
-        ]
+        return [{"role": t.role, "content": t.content, "timestamp": t.timestamp.isoformat()} for t in turns]
 
     def clear_short_term(self):
         """Clear short-term conversation history."""
@@ -246,7 +235,7 @@ class MemoryManager:
         return {
             "short_term_turns": len(self.short_term.turns),
             "long_term_memories": ltm_count,
-            "session_id": self.short_term.current_session_id
+            "session_id": self.short_term.current_session_id,
         }
 
 

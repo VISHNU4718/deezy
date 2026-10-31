@@ -2,14 +2,12 @@
 SQLite database for Deezy memory.
 Provides persistent structured memory storage.
 """
+
 import os
 import sqlite3
-import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 from contextlib import contextmanager
-from datetime import datetime
-
+from pathlib import Path
+from typing import List, Optional
 
 SCHEMA = """
 -- Business profile
@@ -258,100 +256,6 @@ CREATE TABLE IF NOT EXISTS decisions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Strategies
-CREATE TABLE IF NOT EXISTS strategies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT,
-    category TEXT,
-    is_successful BOOLEAN DEFAULT FALSE,
-    success_count INTEGER DEFAULT 0,
-    failure_count INTEGER DEFAULT 0,
-    conditions TEXT,  -- JSON
-    actions TEXT,  -- JSON
-    metadata TEXT,  -- JSON
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- User instructions
-CREATE TABLE IF NOT EXISTS user_instructions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    instruction TEXT NOT NULL,
-    category TEXT,
-    priority INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Agent observations
-CREATE TABLE IF NOT EXISTS observations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category TEXT,
-    title TEXT,
-    description TEXT,
-    severity TEXT,  -- info, warning, critical
-    source TEXT,
-    data TEXT,  -- JSON
-    acknowledged BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Agent decisions
-CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id INTEGER REFERENCES tasks(id),
-    context TEXT,  -- JSON
-    decision TEXT,
-    reasoning TEXT,
-    tool_calls TEXT,  -- JSON
-    outcome TEXT,
-    feedback TEXT,
-    confidence REAL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Strategies
-CREATE TABLE IF NOT EXISTS strategies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT,
-    category TEXT,
-    is_successful BOOLEAN DEFAULT FALSE,
-    success_count INTEGER DEFAULT 0,
-    failure_count INTEGER DEFAULT 0,
-    conditions TEXT,  -- JSON
-    actions TEXT,  -- JSON
-    metadata TEXT,  -- JSON
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- User instructions
-CREATE TABLE IF NOT EXISTS user_instructions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    instruction TEXT NOT NULL,
-    category TEXT,
-    priority INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Agent observations
-CREATE TABLE IF NOT EXISTS observations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category TEXT,
-    title TEXT,
-    description TEXT,
-    severity TEXT,  -- info, warning, critical
-    source TEXT,
-    data TEXT,  -- JSON
-    acknowledged BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Memories (long-term memory)
 CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -375,6 +279,7 @@ CREATE TABLE IF NOT EXISTS conversation_history (
     metadata TEXT,  -- JSON
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
 """
 
 
@@ -440,15 +345,22 @@ class Database:
 _db: Optional[Database] = None
 
 
-def get_db(db_path: str = "data/deezy.db") -> Database:
+def default_db_path() -> str:
+    """Database location: DEEZY_DB_PATH if set, /tmp on Vercel (read-only elsewhere), else data/deezy.db."""
+    if os.environ.get("DEEZY_DB_PATH"):
+        return os.environ["DEEZY_DB_PATH"]
+    return "/tmp/deezy.db" if os.environ.get("VERCEL") else "data/deezy.db"
+
+
+def get_db(db_path: Optional[str] = None) -> Database:
     """Get global database instance."""
     global _db
     if _db is None:
-        _db = Database(db_path)
+        _db = Database(db_path or default_db_path())
     return _db
 
 
-def init_db(db_path: str = "data/deezy.db"):
+def init_db(db_path: Optional[str] = None):
     """Initialize database."""
     get_db(db_path)
 
@@ -457,4 +369,5 @@ __all__ = [
     "Database",
     "get_db",
     "init_db",
+    "default_db_path",
 ]

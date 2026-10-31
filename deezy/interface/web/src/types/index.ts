@@ -98,10 +98,6 @@ export interface TaskCreate {
   objective: string;
 }
 
-export interface TaskCreateResponse {
-  task_id: number;
-}
-
 // --- Conversation Types ---
 
 export interface ConversationMessage {
@@ -209,57 +205,6 @@ export interface ToolSchema {
   };
 }
 
-// --- WebSocket Types ---
-
-export interface WebSocketMessage {
-  type: string;
-  task_id?: number;
-  [key: string]: any;
-}
-
-export interface TaskPlanEvent extends WebSocketMessage {
-  type: "plan_created";
-  plan: Array<{
-    step_id: string;
-    description: string;
-    tool: string;
-    params: Record<string, any>;
-    risk_level: RiskLevel;
-    requires_approval: boolean;
-    depends_on: string[];
-    verification_criteria: string;
-  }>;
-}
-
-export interface TaskStepEvent extends WebSocketMessage {
-  type: "step_started" | "step_completed" | "step_failed";
-  step: TaskStep;
-  error?: string;
-}
-
-export interface TaskCompletedEvent extends WebSocketMessage {
-  type: "task_completed";
-  result?: {
-    message?: string;
-    data?: any;
-  };
-}
-
-export interface TaskFailedEvent extends WebSocketMessage {
-  type: "task_failed";
-  error?: string;
-}
-
-export interface SubscribeTaskMessage {
-  type: "subscribe_task";
-  task_id: number;
-}
-
-export interface SubscribedMessage {
-  type: "subscribed";
-  task_id: number;
-}
-
 // --- Chat Types ---
 
 export interface ChatMessage {
@@ -301,7 +246,9 @@ export interface UseTasksReturn {
   loading: boolean;
   error: string | null;
   loadTasks: () => Promise<void>;
-  createTask: (objective: string) => Promise<TaskCreateResponse>;
+  createTask: (objective: string) => Promise<Task>;
+  approveTask: (id: number) => Promise<Task>;
+  rejectTask: (id: number) => Promise<Task>;
   getTask: (id: number) => Promise<Task>;
 }
 

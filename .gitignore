@@ -48,3 +48,9 @@ htmlcov/
 # IDE
 .idea/
 .vscode/
+node_modules/
+deezy/interface/web/dist/
+.vercel
+.venv/
+.pytest_cache/
+.ruff_cache/

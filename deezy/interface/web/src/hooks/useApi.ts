@@ -4,13 +4,9 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  api,
-  wsClient,
-} from "../utils/api";
+import { api } from "../utils/api";
 import type {
   Task,
-  TaskCreateResponse,
   ConversationBase,
   Conversation,
   ConversationMessage,
@@ -23,12 +19,6 @@ import type {
   MemoryUpdate,
   Settings,
   ToolSchema,
-  WebSocketMessage,
-  TaskPlanEvent,
-  TaskStepEvent,
-  TaskCompletedEvent,
-  TaskFailedEvent,
-  TaskStep,
 } from "../types";
 
 // --- Generic Hook Helpers ---
@@ -66,9 +56,12 @@ function useAsync<T>(
 export function useTasks() {
   const { data: tasks, loading, error, refresh: loadTasks } = useAsync(() => api.getTasks(), []);
 
-  const createTask = useCallback(async (objective: string): Promise<TaskCreateResponse> => {
+  const createTask = useCallback(async (objective: string): Promise<Task> => {
     return api.createTask(objective);
   }, []);
+
+  const approveTask = useCallback(async (id: number): Promise<Task> => api.approveTask(id), []);
+  const rejectTask = useCallback(async (id: number): Promise<Task> => api.rejectTask(id), []);
 
   const getTask = useCallback(async (id: number): Promise<Task> => {
     return api.getTask(id);
@@ -80,6 +73,8 @@ export function useTasks() {
     error,
     loadTasks,
     createTask,
+    approveTask,
+    rejectTask,
     getTask,
   };
 }
@@ -198,10 +193,7 @@ export function useMemories() {
     memories: memories || [],
     loading,
     error,
-    loadMemories: (category?: string) => {
-      if (category !== undefined) setCategoryFilter(category);
-      loadMemories();
-    },
+    loadMemories: setCategory,
     createMemory,
     updateMemory,
     deleteMemory,
@@ -263,124 +255,9 @@ export function useApi() {
   };
 }
 
-// --- WebSocket Hook ---
+// --- Health Hook ---
 
-export function useTaskWebSocket(taskId: number | null, onMessage?: (message: WebSocketMessage) => void) {
-  const [connected, setConnected] = useState(false);
-  const [ws, setWs] = useState<WebSocket | null>(null);
-
-  useEffect(() => {
-    if (!taskId) return;
-
-    let mounted = true;
-    let client: WebSocket | null = null;
-
-    const init = async () => {
-      try {
-        client = new WebSocket(`${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/client_${Date.now()}`);
-        await new Promise<void>((resolve, reject) => {
-          if (!client) return reject(new Error("No client"));
-          client.onopen = () => resolve();
-          client.onerror = () => reject(new Error("Connection failed"));
-        });
-        if (mounted) {
-          setConnected(true);
-          client.send(JSON.stringify({ type: "subscribe_task", task_id: taskId }));
-          if (onMessage) {
-            client.onmessage = (event) => {
-              try {
-                const message: WebSocketMessage = JSON.parse(event.data);
-                onMessage(message);
-              } catch (e) {
-                console.error("[WS] Failed to parse message:", e);
-              }
-            };
-          }
-          setWs(client);
-        }
-      } catch (e) {
-        console.error("[WS] Failed to connect:", e);
-      }
-    };
-
-    init();
-
-    return () => {
-      mounted = false;
-      if (client) {
-        client.close();
-      }
-    };
-  }, [taskId, onMessage]);
-
-  return { connected };
-}
-
-// --- WebSocket Event Hooks ---
-
-export function useWebSocketMessages() {
-  const [messages, setMessages] = useState<WebSocketMessage[]>([]);
-
-  useEffect(() => {
-    const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/client_${Date.now()}`);
-    ws.onmessage = (event) => {
-      try {
-        const message: WebSocketMessage = JSON.parse(event.data);
-        setMessages((prev) => [...prev.slice(-99), message]);
-      } catch (e) {
-        console.error("[WS] Failed to parse message:", e);
-      }
-    };
-    return () => ws.close();
-  }, []);
-
-  return messages;
-}
-
-// --- Specific Event Hooks ---
-
-export function useTaskEvents(taskId: number | null) {
-  const [plan, setPlan] = useState<TaskPlanEvent | null>(null);
-  const [currentStep, setCurrentStep] = useState<TaskStepEvent | null>(null);
-  const [completed, setCompleted] = useState<TaskCompletedEvent | null>(null);
-  const [failed, setFailed] = useState<TaskFailedEvent | null>(null);
-
-  useEffect(() => {
-    if (!taskId) return;
-
-    const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/client_${Date.now()}`);
-    ws.onmessage = (event) => {
-      try {
-        const msg: WebSocketMessage = JSON.parse(event.data);
-        if (msg.task_id !== taskId) return;
-
-        switch (msg.type) {
-          case "plan_created":
-            setPlan(msg as TaskPlanEvent);
-            break;
-          case "step_started":
-          case "step_completed":
-          case "step_failed":
-            setCurrentStep(msg as TaskStepEvent);
-            break;
-          case "task_completed":
-            setCompleted(msg as TaskCompletedEvent);
-            break;
-          case "task_failed":
-            setFailed(msg as TaskFailedEvent);
-            break;
-        }
-      } catch (e) {
-        console.error("[WS] Failed to parse message:", e);
-      }
-    };
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "subscribe_task", task_id: taskId }));
-    };
-
-    return () => ws.close();
-  }, [taskId]);
-
-  return { plan, currentStep, completed, failed };
+export function useHealth() {
+  const { data, error } = useAsync(() => api.healthCheck(), []);
+  return { health: data, error };
 }
