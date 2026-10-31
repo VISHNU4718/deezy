@@ -110,7 +110,8 @@ export function ChatPage() {
     try {
       await addConversationMessage(id, { id: '', role, content, timestamp: '' });
     } catch (e) {
-      console.error('Failed to save message:', e);
+      // The hosted demo's storage is temporary; losing a saved message is not fatal.
+      console.warn('Failed to save message:', e);
     }
   };
 
@@ -174,7 +175,13 @@ export function ChatPage() {
       const task = approve ? await approveTask(currentTask.id) : await rejectTask(currentTask.id);
       showOutcome(task);
     } catch (error) {
-      pushAssistant(`Error: ${error instanceof Error ? error.message : 'Request failed'}`, false);
+      const message = error instanceof Error ? error.message : 'Request failed';
+      pushAssistant(
+        /not found/i.test(message)
+          ? 'That task is no longer on the server. The hosted demo keeps its data in temporary storage that can reset, so please send the request again.'
+          : `Error: ${message}`,
+        false,
+      );
     } finally {
       setIsLoading(false);
     }
