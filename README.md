@@ -17,7 +17,7 @@ The Vercel deployment runs with `DEEZY_DEMO=1` (set automatically when `VERCEL` 
 - **No LLM.** The planner uses keyword rules, so it only understands a few kinds of request (product search, product evaluation, time, to-do items, file search/read/create). Anything else falls through to a product search over the sample catalog, which usually returns "No products matched that search".
 - **Sample tools.** Product search runs over a built-in catalog of 12 items. Web search returns canned results. Nothing is bought, posted or sent.
 - **Sandboxed files.** File tools only see a temporary directory (`/tmp/deezy-sandbox`). Paths that try to leave it are refused. System-inspection tools (running apps, system info) are not registered.
-- **Temporary data.** Tasks, conversations and memories are stored in SQLite under `/tmp`. Serverless instances are recycled and are not shared, so data can disappear at any time.
+- **Temporary data.** Tasks, conversations and memories are stored in SQLite under `/tmp`. Serverless instances are recycled and are not shared, so data can disappear at any time. If an approval ever answers "Task not found", the request landed on a different instance; run the request again.
 - **Shared settings.** Settings changes apply to the whole running instance, not per visitor.
 - **No streaming.** Serverless functions have no WebSockets, so a request runs the whole plan and returns. Plans with a step that changes something are saved and wait for **Approve** or **Reject** in the UI.
 
