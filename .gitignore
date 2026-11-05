@@ -54,3 +54,4 @@ deezy/interface/web/dist/
 .venv/
 .pytest_cache/
 .ruff_cache/
+work/

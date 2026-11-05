@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -211,6 +211,18 @@ def init_app_tables():
 # --- FastAPI App ---
 
 app = FastAPI(title="Deezy API", version="0.1.0")
+
+
+@app.middleware("http")
+async def hosted_workspace_only(request, call_next):
+    # Legacy CLI endpoints use instance-wide SQLite state. Never expose them to
+    # visitors of the hosted, per-browser workspace.
+    path = request.url.path
+    if os.environ.get("VERCEL") and path.startswith("/api/"):
+        if not path.startswith("/api/assistant/") and path != "/api/health":
+            return JSONResponse({"detail": "Legacy API is disabled on the hosted workspace"}, status_code=404)
+    return await call_next(request)
+
 
 # Idempotent, and done at import time so it also works on hosts that skip ASGI lifespan events.
 init_conversation_tables()
@@ -870,6 +882,9 @@ async def get_history_endpoint():
 
 
 # --- Serve React Frontend (after `npm run build` in this directory) ---
+from deezy.interface.web.assistant import router as assistant_router  # noqa: E402
+
+app.include_router(assistant_router)
 
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dist")
 if os.path.isdir(static_dir):
