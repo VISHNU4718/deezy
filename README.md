@@ -1,104 +1,66 @@
 # Deezy
 
-Deezy is a small agent loop with a CLI and a web UI. Given an objective, it:
+A personal assistant for research, planning and workspace tasks. The web app uses the OpenAI Responses API and a small allowlist of tools. It proposes changes, shows the exact arguments, and waits for approval before saving anything.
 
-1. plans a list of tool calls,
-2. asks for approval if any step changes something,
-3. runs the steps, passing results from one step into the next,
-4. checks each step and retries or recovers where it can,
-5. stores the outcome in a SQLite task history and in memory.
+[Open the app](https://deezy-indol.vercel.app)
 
-It started as a personal desktop assistant. This repository is the part that can run anywhere: the loop, the web UI and a set of safe sample tools.
+## What works
 
-## Hosted demo
+- Conversations with an OpenAI model when the server connection is enabled.
+- Optional live web research with source links supplied by OpenAI's web search tool.
+- Browser workspace: text files, to-do items, and preferences saved only when explicitly requested.
+- Read-only tools execute immediately. File writes, task changes and memory changes need approval. File saves include read-back in the execution trace.
+- Approval checks the workspace revision, rejects stale proposals, applies batches atomically, and treats repeated action IDs as already applied.
+- Actual execution traces, provider timing/token usage, and clear errors. No fake shopping catalog or canned research answers in the new interface.
+- Optional browser dictation (review before sending) and read-aloud.
 
-The Vercel deployment runs with `DEEZY_DEMO=1` (set automatically when `VERCEL` is present). What that means:
+Conversations and workspace data persist in this browser's local storage. They do not sync across devices. Export workspace data in Settings before clearing browser data. Files are virtual text files; the assistant has no host filesystem or shell access. To-do items are not scheduled notifications. There is no wake word, autonomous desktop control, email sending or purchasing.
 
-- **No LLM.** The planner uses keyword rules, so it only understands a few kinds of request (product search, product evaluation, time, to-do items, file search/read/create). Anything else falls through to a product search over the sample catalog, which usually returns "No products matched that search".
-- **Sample tools.** Product search runs over a built-in catalog of 12 items. Web search returns canned results. Nothing is bought, posted or sent.
-- **Sandboxed files.** File tools only see a temporary directory (`/tmp/deezy-sandbox`). Paths that try to leave it are refused. System-inspection tools (running apps, system info) are not registered.
-- **Temporary data.** Tasks, conversations and memories are stored in SQLite under `/tmp`. Serverless instances are recycled and are not shared, so data can disappear at any time. If an approval ever answers "Task not found", the request landed on a different instance; run the request again.
-- **Shared settings.** Settings changes apply to the whole running instance, not per visitor.
-- **No streaming.** Serverless functions have no WebSockets, so a request runs the whole plan and returns. Plans with a step that changes something are saved and wait for **Approve** or **Reject** in the UI.
+Without a configured model, the app clearly says **Tools only**. Try `Add task Prepare a project walkthrough`, `Remember keep explanations concise`, `Create file notes.md: Project notes`, `Read file notes.md`, or `List files`. These commands execute real workspace operations after approval; they do not simulate intelligence.
+
+## OpenAI setup
+
+Add these environment variables privately to the hosting project's server settings, then redeploy:
+
+| Variable | Value |
+| --- | --- |
+| `OPENAI_API_KEY` | Your OpenAI API key, server only |
+| `DEEZY_AI_ENABLED` | `1` |
+| `DEEZY_MODEL` | `gpt-4.1-mini` (default) |
+| `DEEZY_WEB_SEARCH` | `1` to enable live research, otherwise `0` |
+
+Never use a `VITE_` prefix for credentials or commit a key. Recheck the connection in Settings after deployment. The status endpoint reports readiness, never the key. A configured connection is not proof that the account has credit or that a particular request will succeed.
+
+The public demo uses the owner's API account. Configure provider project spending controls and hosting access protection appropriate to your budget before enabling it. Requests are bounded to three model rounds, six function calls, 1,600 output tokens per round and a 48-second loop budget. Instance-local throttling allows 12 requests/minute/client; it is best effort and is not a global billing limit. Web search has separate provider costs. The host function allows 60 seconds.
+
+Messages, recent conversation and saved preferences are sent to OpenAI when connected. File contents enter the model context when read. Requests set `store: false`; this does not guarantee zero provider retention. Browser speech services have their own data handling.
+
+Implementation follows the [Responses function calling guide](https://developers.openai.com/api/docs/guides/function-calling) and [web search guide](https://developers.openai.com/api/docs/guides/tools-web-search).
 
 ## Run locally
 
-Requires Python 3.10+ and Node 18+.
+Python 3.10+ and Node 18+:
 
-```bash
-pip install -r requirements.txt
-cd deezy/interface/web && npm ci && npm run build && cd -
-python -m deezy.interface.web.api      # http://127.0.0.1:8000
-```
-
-Add `DEEZY_DEMO=1` to run with the sandbox and mock provider locally. Without it, the file tools work on your real filesystem and the planner uses the configured LLM provider (`deezy/config/settings.yaml`), falling back to the keyword rules if the provider fails. Provider API keys are read from `<PROVIDER>_API_KEY`, for example `OPENROUTER_API_KEY`. The default `local` provider expects an [Ollama](https://ollama.com) server.
-
-For frontend development run `npm run dev` in `deezy/interface/web` (Vite proxies `/api` to port 8000).
-
-CLI:
-
-```bash
-python -m deezy.main task "find a desk lamp under 50"
-python -m deezy.main tools
-python -m deezy.main status
-```
-
-## Configuration
-
-| Variable | Purpose |
-| --- | --- |
-| `DEEZY_DEMO` | `1` enables the sandbox and mock provider |
-| `DEEZY_DB_PATH` | SQLite file (default `data/deezy.db`, `/tmp/deezy.db` on Vercel) |
-| `DEEZY_CONFIG` | alternative settings YAML |
-| `DEEZY_LLM_PROVIDER` | `local`, `openrouter`, `openai`, `anthropic` or `mock` |
-| `DEEZY_SANDBOX_DIR` | demo sandbox directory |
-| `DEEZY_CORS_ORIGINS` | extra comma-separated CORS origins |
-| `AFFILIATE_TAG` | optional tag for product links |
-| `PORT` | port for `python -m deezy.interface.web.api` |
-
-## API
-
-| Method | Path | |
-| --- | --- | --- |
-| GET | `/api/health` | status and demo flag |
-| GET / PUT | `/api/settings` | read / validate and save settings |
-| GET | `/api/tools` | registered tools |
-| GET / POST | `/api/tasks` | list / plan and run a task (`{"objective": "..."}`) |
-| GET | `/api/tasks/{id}` | one task, including its plan |
-| POST | `/api/tasks/{id}/approve`, `/reject` | resolve a task that is `waiting_for_approval` (409 otherwise) |
-| GET | `/api/history` | finished tasks |
-| GET / POST | `/api/conversations` | list / create |
-| GET / PATCH / DELETE | `/api/conversations/{id}` | read, rename, delete |
-| POST | `/api/conversations/{id}/messages` | append a message |
-| GET / POST | `/api/conversations/{id}/export`, `/api/conversations/import`, `/{id}/branch` | export, import, branch |
-| GET / POST / PATCH / DELETE | `/api/memories` | long-term memory |
-
-Interactive docs are at `/docs`.
-
-## Tests
-
-```bash
+```sh
 pip install -r requirements-dev.txt
-ruff check . && ruff format --check .
+cd deezy/interface/web
+npm ci
+npm run build
+cd ../../..
+python -m deezy.interface.web.api
+```
+
+Open `http://127.0.0.1:8000`. The same server environment variables enable OpenAI locally. The new `/api/assistant/*` API is stateless: it validates the supplied workspace and returns changes to the same browser. Hosted Vercel deployments disable the old shared SQLite API endpoints. The health endpoint remains available.
+
+## Verification and limits
+
+```sh
 pytest
+ruff check .
+ruff format --check .
+cd deezy/interface/web && npm run build
 ```
 
-The tests cover plan resolution and summaries, the approval gate, sandbox path handling and the HTTP API. CI also type-checks and builds the frontend. The web UI itself has no unit tests.
+`tests/test_assistant.py` checks approval/decline, atomic batches, stale/repeated approvals, file read-back, workspace isolation, tool/path restrictions, request bounds, rate limits, provider failures, Responses request shape and source annotations. Provider responses are faked in automated tests; these are regression tests, not a model accuracy benchmark. A real model smoke test requires a privately configured key and must be reported separately.
 
-## Layout
-
-```
-api/index.py            Vercel function entry
-deezy/brain/            LLM providers, tool registry, models
-deezy/core/             planner and agent loop
-deezy/tools/            tools (sample implementations)
-deezy/memory/           SQLite wrapper and memory store
-deezy/interface/        CLI and FastAPI app
-deezy/interface/web/    React + TypeScript + Tailwind frontend
-```
-
-## Limits
-
-- The tools are samples. Nothing here shops, posts or controls your computer.
-- Without an LLM the planner is a set of keyword rules.
-- SQLite on serverless storage is not durable.
+The original CLI and keyword planner are retained for compatibility; see [legacy documentation](LEGACY.md). They are not the model path used by the new web interface.
